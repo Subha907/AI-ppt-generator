@@ -1,0 +1,75 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Multi-Agent AWS Architecture Slide Generator - Component 1, Stack 2 (KB).
+  Provisions the Bedrock Knowledge Base (S3 Vectors storage) and its S3 data
+  source. Deploy AFTER 01-base-stack.yaml so the vector index it references
+  already exists (Bedrock KB early-validation requires this). Imports the base
+  stack's exported ARNs. Region target: us-west-2.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: slidegen
+    AllowedPattern: "[a-z0-9-]{3,20}"
+    Description: Must match the ProjectName used for the base stack.
+
+  EmbeddingModelArn:
+    Type: String
+    Default: arn:aws:bedrock:us-west-2::foundation-model/amazon.titan-embed-text-v2:0
+
+  DataSourcePrefix:
+    Type: String
+    Default: "tenants/"
+    Description: >-
+      S3 key prefix the KB ingests from. RFP files live under
+      tenants/{tenantId}/projects/{projectId}/rfps/... so ingestion is scoped
+      to the tenant data tree.
+
+Resources:
+
+  KnowledgeBase:
+    Type: AWS::Bedrock::KnowledgeBase
+    Properties:
+      Name: !Sub "${ProjectName}-kb"
+      Description: RFP knowledge base for the architecture slide generator.
+      RoleArn:
+        Fn::ImportValue: !Sub "${ProjectName}-KnowledgeBaseRoleArn"
+      KnowledgeBaseConfiguration:
+        Type: VECTOR
+        VectorKnowledgeBaseConfiguration:
+          EmbeddingModelArn: !Ref EmbeddingModelArn
+      StorageConfiguration:
+        Type: S3_VECTORS
+        S3VectorsConfiguration:
+          VectorBucketArn:
+            Fn::ImportValue: !Sub "${ProjectName}-VectorBucketArn"
+          IndexArn:
+            Fn::ImportValue: !Sub "${ProjectName}-VectorIndexArn"
+
+  KnowledgeBaseDataSource:
+    Type: AWS::Bedrock::DataSource
+    Properties:
+      Name: !Sub "${ProjectName}-rfp-source"
+      KnowledgeBaseId: !Ref KnowledgeBase
+      DataSourceConfiguration:
+        Type: S3
+        S3Configuration:
+          BucketArn:
+            Fn::ImportValue: !Sub "${ProjectName}-DataBucketArn"
+          InclusionPrefixes:
+            - !Ref DataSourcePrefix
+      VectorIngestionConfiguration:
+        ChunkingConfiguration:
+          ChunkingStrategy: FIXED_SIZE
+          FixedSizeChunkingConfiguration:
+            MaxTokens: 512
+            OverlapPercentage: 20
+
+Outputs:
+  KnowledgeBaseId:
+    Description: Bedrock Knowledge Base ID (-> KNOWLEDGE_BASE_ID)
+    Value: !Ref KnowledgeBase
+
+  DataSourceId:
+    Description: Bedrock KB data source ID (-> DATA_SOURCE_ID)
+    Value: !GetAtt KnowledgeBaseDataSource.DataSourceId

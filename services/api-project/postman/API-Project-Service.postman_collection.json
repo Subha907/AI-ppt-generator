@@ -1,0 +1,308 @@
+{
+  "info": {
+    "name": "API and Project Service (Slide Generator)",
+    "description": "Manual RFP test flow for Component 1. Run the requests top-to-bottom. Test scripts auto-capture projectId, documentId, objectKey and the presigned uploadUrl into collection variables, so you don't copy-paste between steps.\n\nStart the service first:\n  uvicorn app.main:app --port 8000\n\nMake sure your SSO session is active:\n  aws sso login --profile sdg",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://127.0.0.1:8000", "type": "string" },
+    { "key": "apiPrefix", "value": "/api/v1", "type": "string" },
+    { "key": "projectId", "value": "", "type": "string" },
+    { "key": "documentId", "value": "", "type": "string" },
+    { "key": "objectKey", "value": "", "type": "string" },
+    { "key": "uploadUrl", "value": "", "type": "string" },
+    { "key": "contentType", "value": "application/pdf", "type": "string" },
+    { "key": "sizeBytes", "value": "0", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "0. Health check (SSO)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{baseUrl}}/healthz", "host": ["{{baseUrl}}"], "path": ["healthz"] },
+        "description": "Confirms the service is up and authenticated to AWS via your SSO profile."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('200 OK', () => pm.response.code === 200);",
+              "const j = pm.response.json();",
+              "pm.test('SSO identity present', () => pm.expect(j.aws.arn).to.include('assumed-role'));",
+              "console.log('AWS identity:', j.aws.arn);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "1. Create project",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Manual RFP Test\",\n  \"description\": \"Testing with a real RFP\",\n  \"defaultThemeId\": \"aws-standard-v1\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}{{apiPrefix}}/projects",
+          "host": ["{{baseUrl}}{{apiPrefix}}"],
+          "path": ["projects"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('201 Created', () => pm.response.code === 201);",
+              "const j = pm.response.json();",
+              "pm.collectionVariables.set('projectId', j.projectId);",
+              "console.log('projectId =', j.projectId);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Presign upload URL",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"fileName\": \"my-rfp.pdf\",\n  \"contentType\": \"{{contentType}}\",\n  \"sizeBytes\": {{sizeBytes}}\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}{{apiPrefix}}/projects/{{projectId}}/documents/presign",
+          "host": ["{{baseUrl}}{{apiPrefix}}"],
+          "path": ["projects", "{{projectId}}", "documents", "presign"]
+        },
+        "description": "IMPORTANT: set the collection variable `sizeBytes` to your RFP's exact byte size first (see the 'How to test with your RFP' request description). contentType must be application/pdf or the DOCX mime type."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "if (pm.collectionVariables.get('sizeBytes') === '0') {",
+              "  console.warn('sizeBytes is 0 - set it to your RFP file size in bytes before sending.');",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('200 OK', () => pm.response.code === 200);",
+              "const j = pm.response.json();",
+              "pm.collectionVariables.set('documentId', String(j.documentId).trim());",
+              "pm.collectionVariables.set('objectKey', String(j.objectKey).trim());",
+              "pm.collectionVariables.set('uploadUrl', String(j.uploadUrl).trim());",
+              "console.log('documentId =', j.documentId);",
+              "console.log('uploadUrl captured (expires in', j.expiresInSeconds, 's)');"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Upload file to S3 (presigned PUT)",
+      "request": {
+        "method": "PUT",
+        "header": [{ "key": "Content-Type", "value": "{{contentType}}" }],
+        "body": {
+          "mode": "file",
+          "file": { "src": "" }
+        },
+        "url": { "raw": "{{uploadUrl}}", "host": ["{{uploadUrl}}"] },
+        "description": "Select your RFP file in the Body tab (binary). This uploads the bytes directly to S3 using the presigned URL captured in step 2. The Content-Type header MUST match step 2's contentType. Expect 200."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('S3 PUT 200', () => pm.response.code === 200);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Complete upload (start ingestion)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"documentId\": \"{{documentId}}\",\n  \"objectKey\": \"{{objectKey}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}{{apiPrefix}}/projects/{{projectId}}/documents/complete",
+          "host": ["{{baseUrl}}{{apiPrefix}}"],
+          "path": ["projects", "{{projectId}}", "documents", "complete"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('202 Accepted', () => pm.response.code === 202);",
+              "const j = pm.response.json();",
+              "pm.test('ingestion started', () => pm.expect(j.ingestionStatus).to.eql('INGESTING'));",
+              "console.log('ingestionJobId =', j.ingestionJobId);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Knowledge status (poll)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}{{apiPrefix}}/projects/{{projectId}}/knowledge-status",
+          "host": ["{{baseUrl}}{{apiPrefix}}"],
+          "path": ["projects", "{{projectId}}", "knowledge-status"]
+        },
+        "description": "Send repeatedly until kbStatus becomes READY. A real multi-page RFP can take from ~30s to a few minutes."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('200 OK', () => pm.response.code === 200);",
+              "const j = pm.response.json();",
+              "console.log('kbStatus =', j.kbStatus, '| ready', j.readyCount + '/' + j.documentCount);",
+              "pm.test('kbStatus is READY (re-send if INGESTING)', () => pm.expect(['READY']).to.include(j.kbStatus));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. List documents",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}{{apiPrefix}}/projects/{{projectId}}/documents",
+          "host": ["{{baseUrl}}{{apiPrefix}}"],
+          "path": ["projects", "{{projectId}}", "documents"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('200 OK', () => pm.response.code === 200);",
+              "console.log(JSON.stringify(pm.response.json(), null, 2));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Start slide job (optional)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Idempotency-Key", "value": "{{$guid}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"architectureType\": \"DEPLOYMENT\",\n  \"instruction\": \"Create a highly available AWS deployment architecture\",\n  \"documentIds\": [\"{{documentId}}\"],\n  \"slideProfile\": \"AWS_16_9\",\n  \"outputFormat\": \"PPTX\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}{{apiPrefix}}/projects/{{projectId}}/slide-jobs",
+          "host": ["{{baseUrl}}{{apiPrefix}}"],
+          "path": ["projects", "{{projectId}}", "slide-jobs"]
+        },
+        "description": "Records a slide-job request (the four-agent orchestration is not wired yet). Uses a random Idempotency-Key each send; reuse the same key to verify no duplicate job is created."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('202 Accepted', () => pm.response.code === 202);",
+              "const j = pm.response.json();",
+              "console.log('jobId =', j.jobId, '| status', j.status);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Errors/ 415 Unsupported type",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"fileName\": \"notes.txt\",\n  \"contentType\": \"text/plain\",\n  \"sizeBytes\": 100\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}{{apiPrefix}}/projects/{{projectId}}/documents/presign",
+          "host": ["{{baseUrl}}{{apiPrefix}}"],
+          "path": ["projects", "{{projectId}}", "documents", "presign"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": { "exec": ["pm.test('415', () => pm.response.code === 415);"] }
+        }
+      ]
+    },
+    {
+      "name": "Errors/ 413 Too large",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"fileName\": \"huge.pdf\",\n  \"contentType\": \"application/pdf\",\n  \"sizeBytes\": 99999999999\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}{{apiPrefix}}/projects/{{projectId}}/documents/presign",
+          "host": ["{{baseUrl}}{{apiPrefix}}"],
+          "path": ["projects", "{{projectId}}", "documents", "presign"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": { "exec": ["pm.test('413', () => pm.response.code === 413);"] }
+        }
+      ]
+    },
+    {
+      "name": "Errors/ 404 Wrong project scope",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}{{apiPrefix}}/projects/prj_doesnotexist",
+          "host": ["{{baseUrl}}{{apiPrefix}}"],
+          "path": ["projects", "prj_doesnotexist"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": { "exec": ["pm.test('404', () => pm.response.code === 404);"] }
+        }
+      ]
+    }
+  ]
+}

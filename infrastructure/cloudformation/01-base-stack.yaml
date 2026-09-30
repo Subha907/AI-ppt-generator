@@ -1,0 +1,220 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Multi-Agent AWS Architecture Slide Generator - Component 1, Stack 1 (base).
+  Provisions the private data bucket, the S3 Vectors bucket + index, the single
+  DynamoDB table, and the IAM role the Bedrock Knowledge Base assumes.
+
+  Deploy this FIRST, then 02-kb-stack.yaml. The Knowledge Base is a separate
+  stack because Bedrock KB early-validation requires the S3 Vectors index to
+  already exist before the KB can reference it. Region target: us-west-2.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: slidegen
+    AllowedPattern: "[a-z0-9-]{3,20}"
+    Description: Short prefix used to name resources.
+
+  EmbeddingModelArn:
+    Type: String
+    Default: arn:aws:bedrock:us-west-2::foundation-model/amazon.titan-embed-text-v2:0
+    Description: Bedrock embedding model ARN the KB role may invoke (Titan v2 = 1024 dims).
+
+  VectorDimension:
+    Type: Number
+    Default: 1024
+    MinValue: 1
+    MaxValue: 4096
+    Description: Must match the embedding model output dimension (Titan v2 = 1024).
+
+Resources:
+
+  # --- Private data bucket: RFP source files + generated artifacts ---------
+  DataBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${ProjectName}-data-${AWS::AccountId}-${AWS::Region}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: alias/aws/s3
+      VersioningConfiguration:
+        Status: Enabled
+      CorsConfiguration:
+        # Enables browser-based presigned PUT uploads during local UI dev.
+        CorsRules:
+          - AllowedMethods: [PUT, GET, HEAD]
+            AllowedOrigins: ["*"]
+            AllowedHeaders: ["*"]
+            ExposedHeaders: [ETag]
+            MaxAge: 3000
+
+  # --- Shared, read-only reference bucket: AWS icons, patterns, themes -----
+  # (PDF section 9.1) Kept separate from tenant RFP data. Holds approved AWS
+  # architecture icons under aws-icons/{version}/{category}/{service}.png.
+  SharedReferenceBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${ProjectName}-shared-refs-${AWS::AccountId}-${AWS::Region}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: alias/aws/s3
+      VersioningConfiguration:
+        Status: Enabled
+
+  # --- S3 Vectors bucket + index (embedding storage) -----------------------
+  VectorBucket:
+    Type: AWS::S3Vectors::VectorBucket
+    Properties:
+      # Stays within the 63-char limit; account id keeps it globally unique.
+      VectorBucketName: !Sub "${ProjectName}-vectors-${AWS::AccountId}"
+
+  VectorIndex:
+    Type: AWS::S3Vectors::Index
+    DependsOn: VectorBucket
+    Properties:
+      # Pass the bucket NAME (same !Sub used to create it); using !Ref/!GetAtt
+      # here injects the 77-char ARN into VectorBucketName and exceeds its
+      # 63-char limit.
+      VectorBucketName: !Sub "${ProjectName}-vectors-${AWS::AccountId}"
+      IndexName: !Sub "${ProjectName}-kb-index-v2"
+      DataType: float32
+      Dimension: !Ref VectorDimension
+      DistanceMetric: cosine
+      # Bedrock KB auto-adds AMAZON_BEDROCK_TEXT (the full chunk text) and
+      # AMAZON_BEDROCK_METADATA. Filterable metadata in S3 Vectors is capped at
+      # 2048 bytes, so real chunks fail to sync unless these keys are declared
+      # non-filterable. (When Bedrock auto-creates the index it does this for us;
+      # since we create the index ourselves, we must set it explicitly.)
+      MetadataConfiguration:
+        NonFilterableMetadataKeys:
+          - AMAZON_BEDROCK_TEXT
+          - AMAZON_BEDROCK_METADATA
+
+  # --- DynamoDB single table (projects/docs/jobs/artifacts/idempotency) ----
+  ArchitectureGeneratorTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: ArchitectureGenerator
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
+  # --- IAM role assumed by the Bedrock Knowledge Base ----------------------
+  KnowledgeBaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-kb-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: kb-permissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Invoke the embedding model during ingestion and query.
+              - Sid: InvokeEmbeddingModel
+                Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Ref EmbeddingModelArn
+              # Read RFP source objects from the data bucket.
+              - Sid: ReadDataBucket
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt DataBucket.Arn
+                  - !Sub "${DataBucket.Arn}/*"
+              # Read/write the S3 Vectors index that backs the KB.
+              - Sid: AccessVectorStore
+                Effect: Allow
+                Action:
+                  - s3vectors:GetIndex
+                  - s3vectors:QueryVectors
+                  - s3vectors:GetVectors
+                  - s3vectors:PutVectors
+                  - s3vectors:ListVectors
+                  - s3vectors:DeleteVectors
+                Resource:
+                  - !GetAtt VectorBucket.VectorBucketArn
+                  - !GetAtt VectorIndex.IndexArn
+
+Outputs:
+  DataBucketName:
+    Description: Private data bucket (-> DATA_BUCKET)
+    Value: !Ref DataBucket
+
+  SharedReferenceBucketName:
+    Description: Shared read-only reference bucket for AWS icons (-> ICON_BUCKET)
+    Value: !Ref SharedReferenceBucket
+
+  DataBucketArn:
+    Value: !GetAtt DataBucket.Arn
+    Export:
+      Name: !Sub "${ProjectName}-DataBucketArn"
+
+  VectorBucketName:
+    Description: S3 Vectors bucket (-> VECTOR_BUCKET)
+    Value: !Sub "${ProjectName}-vectors-${AWS::AccountId}"
+
+  VectorBucketArn:
+    Value: !GetAtt VectorBucket.VectorBucketArn
+    Export:
+      Name: !Sub "${ProjectName}-VectorBucketArn"
+
+  VectorIndexArn:
+    Value: !GetAtt VectorIndex.IndexArn
+    Export:
+      Name: !Sub "${ProjectName}-VectorIndexArn"
+
+  DynamoTableName:
+    Description: Single DynamoDB table (-> DDB_TABLE)
+    Value: !Ref ArchitectureGeneratorTable
+
+  KnowledgeBaseRoleArn:
+    Value: !GetAtt KnowledgeBaseRole.Arn
+    Export:
+      Name: !Sub "${ProjectName}-KnowledgeBaseRoleArn"

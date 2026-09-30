@@ -1,0 +1,114 @@
+{
+  "$id": "https://slidegen/contracts/layout-model",
+  "title": "LayoutModel",
+  "description": "Agent 2 (Layout & Geometric) output. Places the architecture topology on a 16:9 slide with absolute coordinates (inches), z-order, nested containers and connector routes. Consumed by Agent 3 (Compiler).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "projectId", "jobId", "slide", "objects", "connectors"],
+  "properties": {
+    "schemaVersion": { "type": "string", "const": "1.0" },
+    "projectId": { "type": "string", "minLength": 1 },
+    "jobId": { "type": "string", "minLength": 1 },
+    "title": { "type": "string" },
+    "slide": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["widthIn", "heightIn", "safeMarginIn"],
+      "properties": {
+        "widthIn": { "type": "number", "exclusiveMinimum": 0 },
+        "heightIn": { "type": "number", "exclusiveMinimum": 0 },
+        "safeMarginIn": { "type": "number", "minimum": 0 }
+      }
+    },
+    "objects": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["objectId", "kind", "x", "y", "w", "h", "z"],
+        "properties": {
+          "objectId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Stable id, identical to the architecture node id it renders."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["CONTAINER", "ICON_LABEL", "LABEL"],
+            "description": "CONTAINER = grouping box; ICON_LABEL = service icon + caption; LABEL = text only."
+          },
+          "x": { "type": "number" },
+          "y": { "type": "number" },
+          "w": { "type": "number", "exclusiveMinimum": 0 },
+          "h": { "type": "number", "exclusiveMinimum": 0 },
+          "z": {
+            "type": "integer",
+            "description": "Draw order; lower values are drawn first (behind)."
+          },
+          "parentObjectId": { "type": ["string", "null"], "default": null },
+          "iconKey": {
+            "type": ["string", "null"],
+            "default": null,
+            "description": "Icon manifest key, e.g. 'compute/ecs'. Resolved by Agent 3."
+          },
+          "label": { "type": ["string", "null"], "default": null },
+          "nodeType": {
+            "type": ["string", "null"],
+            "default": null,
+            "description": "Carried through from the architecture node type for styling."
+          }
+        }
+      }
+    },
+    "connectors": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["edgeId", "sourceObjectId", "targetObjectId", "route", "z"],
+        "properties": {
+          "edgeId": { "type": "string", "minLength": 1 },
+          "sourceObjectId": { "type": "string", "minLength": 1 },
+          "targetObjectId": { "type": "string", "minLength": 1 },
+          "route": {
+            "type": "string",
+            "enum": ["ORTHOGONAL", "STRAIGHT", "SPLINE"],
+            "default": "ORTHOGONAL"
+          },
+          "edgeClass": {
+            "type": "string",
+            "enum": ["request", "replication", "security"],
+            "default": "request",
+            "description": "Functional class driving connector color/style (Ruleset section 7)."
+          },
+          "z": { "type": "integer" },
+          "label": { "type": ["string", "null"], "default": null },
+          "points": {
+            "type": "array",
+            "default": [],
+            "description": "Ordered polyline points (inches) from source anchor to target anchor.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["x", "y"],
+              "properties": {
+                "x": { "type": "number" },
+                "y": { "type": "number" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "overlapCount": { "type": "integer", "minimum": 0 },
+        "outOfBoundsCount": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

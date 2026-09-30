@@ -1,0 +1,67 @@
+{
+  "$id": "https://slidegen/contracts/review-report",
+  "title": "VisualReviewReport",
+  "description": "Agent 4 (Visual Reviewer) output. A machine-readable assessment of the rendered slide preview against quality rules. The reviewer only REPORTS issues; the orchestrator applies corrections by looping back to Agents 2/3.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "projectId", "jobId", "decision", "score", "issues"],
+  "properties": {
+    "schemaVersion": { "type": "string", "const": "1.0" },
+    "projectId": { "type": "string", "minLength": 1 },
+    "jobId": { "type": "string", "minLength": 1 },
+    "attempt": { "type": "integer", "minimum": 1, "default": 1 },
+    "decision": {
+      "type": "string",
+      "enum": ["PASS", "REVISE"],
+      "description": "PASS = publish; REVISE = apply corrections and re-render."
+    },
+    "score": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Overall visual-quality score."
+    },
+    "issues": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["issueId", "severity", "rule", "objectIds", "recommendedAction"],
+        "properties": {
+          "issueId": { "type": "string", "minLength": 1 },
+          "severity": {
+            "type": "string",
+            "enum": ["LOW", "MEDIUM", "HIGH"]
+          },
+          "rule": {
+            "type": "string",
+            "description": "Rule code, e.g. TEXT_CLIPPED, LOW_CONTRAST, OVERLAP, EXCESSIVE_CROSSINGS, INCONSISTENT_SPACING, UNREADABLE_LABEL, OUT_OF_BOUNDS."
+          },
+          "objectIds": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "IDs of the layout objects the issue applies to."
+          },
+          "recommendedAction": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "description": "e.g. RESIZE, MOVE, RESPACE, RELABEL, REGROUP, RECOLOR, REROUTE."
+              },
+              "delta": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "Optional numeric adjustment hints, e.g. {\"w\": 0.25}."
+              }
+            }
+          }
+        }
+      }
+    },
+    "summary": { "type": "string" }
+  }
+}
