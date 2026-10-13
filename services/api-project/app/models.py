@@ -29,6 +29,10 @@ class IngestionStatus(str, Enum):
     FAILED = "FAILED"
 
 
+# Legacy family words, kept for backward compatibility. The full set of
+# selectable types now comes dynamically from the semantic rule-pack catalog
+# (see app/catalog.py), so the stored job architectureType is a free-form
+# string holding the resolved rule-pack id (e.g. "deployment.network_focused").
 class ArchitectureType(str, Enum):
     BUSINESS = "BUSINESS"
     APPLICATION = "APPLICATION"
@@ -68,11 +72,34 @@ class CompleteUploadRequest(BaseModel):
 
 
 class StartJobRequest(BaseModel):
-    architectureType: ArchitectureType
+    """Diagram-type selection is category + subCategory (preferred), e.g.
+    category='deployment', subCategory='network_focused'. For backward
+    compatibility a direct architectureType (legacy family word OR a rule-pack
+    id like 'deployment.network_focused') is also accepted. At least one of
+    {category, architectureType} must be provided; the server resolves the
+    final rule-pack id via the catalog.
+    """
+    category: str | None = Field(default=None, max_length=100)
+    subCategory: str | None = Field(default=None, max_length=100)
+    architectureType: str | None = Field(default=None, max_length=100)
     instruction: str = Field(min_length=1, max_length=4000)
     documentIds: list[str] = Field(min_length=1)
     slideProfile: str = "AWS_16_9"
     outputFormat: str = "PPTX"
+
+
+# --- Catalog (architecture-type picker) ------------------------------------
+class ArchitectureSubType(BaseModel):
+    subCategory: str
+    packId: str
+    label: str
+    triggerTerms: list[str] = []
+
+
+class ArchitectureCategory(BaseModel):
+    category: str
+    label: str
+    subTypes: list[ArchitectureSubType]
 
 
 # --- API responses ---------------------------------------------------------
@@ -107,7 +134,7 @@ class DocumentResponse(BaseModel):
 class JobResponse(BaseModel):
     jobId: str
     projectId: str
-    architectureType: ArchitectureType
+    architectureType: str  # resolved rule-pack id (or legacy family word)
     status: JobStatus
     currentState: str | None = None
     progressPercent: int = 0

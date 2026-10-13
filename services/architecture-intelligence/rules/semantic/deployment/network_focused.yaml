@@ -1,0 +1,85 @@
+rule_pack:
+  id: deployment.network_focused
+  version: 1.0.0
+  owner: agent_1
+  status: approved
+  extends:
+  - semantic/deployment/logical.yaml
+classification:
+  trigger_terms:
+  - network focused
+  - connectivity
+  - VPC
+  - subnet
+  - ingress
+  - egress
+  - Direct Connect
+  - VPN
+required_concerns:
+- external_networks
+- vpc_boundary
+- ingress_path
+- workload_path
+- data_path
+- security_control_points
+- observability
+conditional_concerns:
+  hybrid_connectivity:
+    include_when:
+      evidence_contains_any:
+      - on-premises
+      - Direct Connect
+      - site-to-site VPN
+  transit_gateway:
+    include_when:
+      evidence_contains_any:
+      - multi-vpc
+      - transit gateway
+  disaster_recovery:
+    include_when:
+      evidence_contains_any:
+      - DR
+      - secondary region
+      - RTO
+      - RPO
+    otherwise: omit
+prohibited_behavior:
+- invent_cidr_ranges
+- invent_regions
+- invent_direct_connect_or_vpn
+- show_routes_without_evidence
+completeness_checks:
+- id: ingress_path
+  severity: error
+  condition:
+    exists: path.external_to_workload
+- id: scoped_primary_components
+  severity: error
+  condition:
+    every: components[importance=primary]
+    rule: scope_ref_present
+aws_vocabulary:
+  external_networks: ["Internet", "on-premises network", Amazon Route 53, "corporate data center"]
+  vpc_boundary: [Amazon VPC, "Internet Gateway", "NAT Gateway"]
+  ingress_path: [Amazon CloudFront, AWS WAF, Application Load Balancer, "Network Load Balancer", Amazon API Gateway]
+  workload_path: [Amazon ECS, Amazon EKS, Amazon EC2]
+  data_path: [Amazon RDS, Amazon Aurora, Amazon ElastiCache]
+  security_control_points: [AWS WAF, "Security Groups", "Network ACLs", AWS Network Firewall, AWS IAM]
+  hybrid_connectivity: ["AWS Direct Connect", "Site-to-Site VPN", "AWS Transit Gateway"]
+  transit_gateway: ["AWS Transit Gateway", "VPC Peering"]
+  observability: [Amazon CloudWatch, "VPC Flow Logs", AWS CloudTrail]
+authoring_rules:
+  intent: "Model NETWORK CONNECTIVITY and traffic paths as the focus: external networks, VPC boundary, ingress/egress, subnet tiers, control points. Emphasize how traffic FLOWS across trust boundaries."
+  nesting: "ACCOUNT > REGION > VPC > SUBNET (public/private/isolated tiers). Show Internet Gateway / NAT Gateway on the VPC boundary."
+  ingress_egress: "Show the explicit ingress path (Internet -> CloudFront/WAF -> ALB -> compute) and egress (compute -> NAT Gateway -> Internet). Every primary component must sit inside a scope (subnet/VPC)."
+  cidr_policy: "NEVER invent CIDR ranges, regions, Direct Connect, or VPN unless the evidence states them. Show routes only when evidence supports them."
+  hybrid: "Only include Direct Connect / VPN / Transit Gateway when evidence mentions on-premises, hybrid, or multi-VPC connectivity."
+  edges: "Directional traffic flows with protocol/port labels where known ('HTTPS 443', 'TCP 5432'). Emphasize boundary crossings."
+renderer_hints:
+  preferred_layout: hub_and_spoke
+  alternate_layout: multi_az_columns
+  emphasize:
+  - network_boundaries
+  - trust_boundaries
+  - ingress
+  - egress

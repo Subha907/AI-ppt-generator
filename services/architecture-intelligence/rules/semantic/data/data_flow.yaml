@@ -1,0 +1,75 @@
+rule_pack:
+  id: data.data_flow
+  version: 1.0.0
+  owner: agent_1
+  status: approved
+  extends:
+  - semantic/common.yaml
+classification:
+  trigger_terms:
+  - data architecture
+  - data flow
+required_concerns:
+- sources
+- ingestion
+- processing
+- storage
+- governance
+- consumption
+conditional_concerns:
+  cdc:
+    include_when:
+      evidence_contains_any:
+      - CDC
+      - Debezium
+  streaming:
+    include_when:
+      evidence_contains_any:
+      - streaming
+      - Kafka
+      - Kinesis
+prohibited_behavior:
+- invent_data_classification
+- imply_realtime_from_batch
+- omit_direction
+completeness_checks:
+- id: has_source_store_sink
+  severity: error
+  condition:
+    all_of:
+    - exists: nodes[concern=sources]
+    - exists: nodes[concern=storage]
+    - exists: nodes[concern=consumption]
+aws_vocabulary:
+  sources: [Amazon RDS, Amazon DynamoDB, Amazon S3, "on-premises DB", "SaaS API", Amazon Kinesis]
+  ingestion: [AWS Glue, AWS DMS, Amazon Kinesis Data Firehose, Amazon MSK, AWS DataSync]
+  processing: [AWS Glue, Amazon EMR, AWS Lambda, Amazon Kinesis Data Analytics, Amazon Athena]
+  storage: [Amazon S3, Amazon Redshift, Amazon S3 (Data Lake), AWS Lake Formation, Amazon DynamoDB]
+  governance: [AWS Lake Formation, AWS Glue Data Catalog, Amazon DataZone]
+  consumption: [Amazon QuickSight, Amazon Athena, Amazon Redshift, Amazon SageMaker, "BI tools"]
+node_vocabulary:
+  sources: [DATASTORE, DATABASE, EXTERNAL]
+  ingestion: [INTEGRATION, COMPUTE]
+  processing: [COMPUTE, INTEGRATION]
+  storage: [STORAGE, DATASTORE, DATABASE]
+  governance: [SECURITY, SERVICE]
+  consumption: [SERVICE, COMPONENT, EXTERNAL]
+authoring_rules:
+  intent: "Model the DATA PIPELINE as a left-to-right flow through stages: sources -> ingestion -> processing -> storage -> consumption, with governance spanning. Use AWS data services; this is an AWS-native data architecture."
+  root: "Create a single root CONTAINER (e.g. '<Product> Data Architecture'); each stage is a CONTAINER lane child of the root in lane_order."
+  stages:
+  - "'Sources' -> operational DBs, external SaaS/APIs, streams that originate data."
+  - "'Ingestion' -> the services that move data in (Glue/DMS/Firehose/MSK). Batch vs streaming must be distinguished by evidence, never assumed."
+  - "'Processing' -> transform/ETL/analytics compute (Glue/EMR/Lambda/Athena)."
+  - "'Storage' -> the data lake / warehouse (S3/Redshift/Lake Formation)."
+  - "'Consumption' -> BI, ML, downstream consumers (QuickSight/SageMaker/Athena)."
+  - "'Governance' (optional) -> cataloguing, access control (Lake Formation/Glue Catalog)."
+  edges: "Every edge is DIRECTIONAL, left-to-right along the flow. Label with the movement type ('batch load', 'stream', 'ETL', 'query'). Never omit direction."
+renderer_hints:
+  preferred_layout: left_to_right_flow
+  lane_order:
+  - sources
+  - ingestion
+  - processing
+  - storage
+  - consumption

@@ -1,0 +1,39 @@
+rule_pack:
+  id: devsecops.pipeline
+  version: 1.0.0
+  owner: agent_1
+  status: approved
+  extends:
+  - semantic/common.yaml
+classification:
+  trigger_terms:
+  - DevSecOps
+  - CI/CD
+  - deployment pipeline
+required_concerns:
+- source
+- build
+- test
+- security_scan
+- artifact
+- approval
+- deployment
+- rollback
+- observability
+conditional_concerns: {}
+prohibited_behavior:
+- invent_tools
+- omit_mandatory_approval
+- omit_rollback
+completeness_checks: []
+renderer_hints:
+  preferred_layout: swimlane
+  lane_order:
+  - plan
+  - code
+  - build
+  - test
+  - secure
+  - release
+  - deploy
+  - operate

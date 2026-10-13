@@ -1,0 +1,27 @@
+rule_pack:
+  id: genai.agentic
+  version: 1.0.0
+  owner: agent_1
+  status: approved
+  extends:
+  - semantic/genai/rag.yaml
+classification:
+  trigger_terms:
+  - agentic AI
+  - AI agent
+  - multi-agent
+required_concerns:
+- agent_orchestrator
+- tool_registry
+- state
+- authorization
+- guardrails
+- auditability
+conditional_concerns: {}
+prohibited_behavior:
+- grant_tools_without_authorization
+- invent_autonomous_actions
+- omit_human_approval_for_high_risk
+completeness_checks: []
+renderer_hints:
+  preferred_layout: central_platform

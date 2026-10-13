@@ -35,3 +35,29 @@ def get_icon_stream(icon_key: str | None) -> io.BytesIO | None:
     if not data:
         return None
     return io.BytesIO(data)
+
+
+# Key under which the base PPTX template is stored in the shared bucket. The
+# compiler builds the deck on top of this template (brand master/theme) so the
+# generated content inherits its styling.
+TEMPLATE_KEY = "templates/template_slide.pptx"
+
+
+@lru_cache(maxsize=1)
+def _fetch_template_bytes() -> bytes | None:
+    settings = get_settings()
+    if settings.icon_source != "s3" or not settings.icon_bucket:
+        return None
+    try:
+        obj = s3_client().get_object(Bucket=settings.icon_bucket, Key=TEMPLATE_KEY)
+        return obj["Body"].read()
+    except Exception:
+        return None
+
+
+def get_template_stream() -> io.BytesIO | None:
+    """Return a fresh BytesIO of the base PPTX template, or None if missing."""
+    data = _fetch_template_bytes()
+    if not data:
+        return None
+    return io.BytesIO(data)

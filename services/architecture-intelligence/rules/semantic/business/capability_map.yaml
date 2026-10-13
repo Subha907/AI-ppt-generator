@@ -1,0 +1,37 @@
+rule_pack:
+  id: business.capability_map
+  version: 1.0.0
+  owner: agent_1
+  status: approved
+  extends:
+  - semantic/common.yaml
+classification:
+  trigger_terms:
+  - capability map
+  - business capabilities
+required_concerns:
+- business_domains
+- capability_groups
+- capabilities
+conditional_concerns: {}
+prohibited_behavior:
+- include_aws_service_icons
+- create_capabilities_from_technology_names
+- include_vpc_subnet_az_or_servers
+completeness_checks: []
+node_vocabulary:
+  actors: [ACTOR]
+  capabilities: [CAPABILITY]
+  processes: [PROCESS]
+  external: [EXTERNAL]
+authoring_rules:
+  intent: "Model the BUSINESS, NOT technology. ABSOLUTELY NO AWS services, VPC, servers, or databases-as-infrastructure. properties.awsService MUST be null for every node."
+  root: "Create a single root CONTAINER (e.g. '<Product> Business Architecture'); group CONTAINERs are children of it."
+  group_containers:
+  - "'Actors & Stakeholders' -> ACTOR nodes (Customer, Grading Expert, Partner Lab...)."
+  - "'Core Business Capabilities' -> primary CAPABILITY nodes (Intake, Grading, Certification...)."
+  - "'Supporting Capabilities' -> secondary CAPABILITY nodes (Billing, CRM, Reporting, Compliance)."
+  - "'Value Stream' -> ordered PROCESS nodes (Submit Sample -> Assign Grader -> Issue Certificate)."
+  edges: "ACTOR -> CAPABILITY ('uses'/'performs'); PROCESS -> PROCESS ('then'); CAPABILITY -> CAPABILITY ('supports'/'depends on'). Short business labels."
+renderer_hints:
+  preferred_layout: capability_map

@@ -1,0 +1,30 @@
+rule_pack:
+  id: genai.rag
+  version: 1.0.0
+  owner: agent_1
+  status: approved
+  extends:
+  - semantic/common.yaml
+classification:
+  trigger_terms:
+  - RAG
+  - knowledge base
+required_concerns:
+- user_channels
+- orchestration
+- model_access
+- knowledge_sources
+- ingestion
+- embeddings
+- retrieval
+- context_assembly
+- guardrails
+- observability
+conditional_concerns: {}
+prohibited_behavior:
+- imply_model_training_when_only_rag
+- expose_sensitive_content
+- invent_vector_store
+completeness_checks: []
+renderer_hints:
+  preferred_layout: central_platform

@@ -1,0 +1,31 @@
+rule_pack:
+  id: deployment.multi_region
+  version: 1.0.0
+  owner: agent_1
+  status: approved
+  extends:
+  - semantic/deployment/logical.yaml
+classification:
+  trigger_terms:
+  - multi-region
+  - disaster recovery
+  - active-active
+  - active-passive
+required_concerns:
+- primary_region
+- recovery_region
+- traffic_failover
+- application_recovery
+- data_replication
+conditional_concerns: {}
+prohibited_behavior:
+- invent_rto_or_rpo
+- infer_active_active_without_evidence
+- invent_replication_direction
+completeness_checks:
+- id: failover_path
+  severity: error
+  condition:
+    exists: relationship[type=failover]
+renderer_hints:
+  preferred_layout: multi_region_mirror

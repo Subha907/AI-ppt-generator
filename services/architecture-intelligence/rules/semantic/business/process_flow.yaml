@@ -1,0 +1,26 @@
+rule_pack:
+  id: business.process_flow
+  version: 1.0.0
+  owner: agent_1
+  status: approved
+  extends:
+  - semantic/common.yaml
+classification:
+  trigger_terms:
+  - business process
+  - process flow
+  - user journey
+required_concerns:
+- start_event
+- end_event
+- actors
+- steps
+- decisions
+- handoffs
+conditional_concerns: {}
+prohibited_behavior:
+- invent_process_steps
+- omit_decision_outcomes
+completeness_checks: []
+renderer_hints:
+  preferred_layout: swimlane

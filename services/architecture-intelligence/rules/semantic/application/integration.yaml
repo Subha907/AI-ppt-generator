@@ -1,0 +1,33 @@
+rule_pack:
+  id: application.integration
+  version: 1.0.0
+  owner: agent_1
+  status: approved
+  extends:
+  - semantic/common.yaml
+classification:
+  trigger_terms:
+  - integration
+  - API flow
+  - event flow
+required_concerns:
+- producers
+- consumers
+- broker_or_api
+- interface_type
+- protocol
+- transformations
+conditional_concerns:
+  retry_and_dlq:
+    include_when:
+      evidence_contains_any:
+      - retry
+      - dead letter
+      - guaranteed delivery
+prohibited_behavior:
+- represent_event_as_synchronous
+- invent_protocols
+- omit_direction
+completeness_checks: []
+renderer_hints:
+  preferred_layout: left_to_right_flow

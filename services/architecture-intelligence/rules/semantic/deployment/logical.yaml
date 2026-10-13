@@ -1,0 +1,26 @@
+rule_pack:
+  id: deployment.logical
+  version: 1.0.0
+  owner: agent_1
+  status: approved
+  extends:
+  - semantic/common.yaml
+classification:
+  trigger_terms:
+  - deployment architecture
+  - infrastructure architecture
+required_concerns:
+- users_or_callers
+- entry_path
+- compute
+- data
+- integration
+- security
+- observability
+conditional_concerns: {}
+prohibited_behavior:
+- invent_regions
+- invent_availability_zones
+completeness_checks: []
+renderer_hints:
+  preferred_layout: layered_architecture

@@ -212,7 +212,9 @@ Data-flow edges & Edge Consolidation Protocols (CRITICAL FOR REDUCING LINE TANGL
 - Keep edge labels very short (e.g. "HTTPS", "IAM Auth", "TCP 5432", "Logs").
 """
 
-_TYPE_BLOCK = {
+# Legacy hardcoded blocks, kept ONLY as a fallback if the rule-pack system
+# cannot resolve/render a pack for the requested type.
+_LEGACY_TYPE_BLOCK = {
     "BUSINESS": _BUSINESS,
     "APPLICATION": _APPLICATION,
     "DEPLOYMENT": _DEPLOYMENT,
@@ -220,9 +222,33 @@ _TYPE_BLOCK = {
 
 
 def system_prompt(architecture_type: str) -> str:
-    """Return the full system prompt for the given architecture type."""
-    block = _TYPE_BLOCK.get(architecture_type.upper(), _DEPLOYMENT)
-    return _BASE + block
+    """Return the full system prompt for the requested architecture type.
+
+    Primary path: resolve the type (legacy enum, rule-pack id, or alias) to a
+    semantic rule pack, then render it into the type-specific block. Falls back
+    to the legacy hardcoded block if the rule-pack system is unavailable.
+    """
+    try:
+        from . import rules
+        from .prompt_render import render_type_block
+
+        pack_id = rules.resolve_type(architecture_type)
+        block = render_type_block(rules.get_rule_pack(pack_id))
+        return _BASE + "\n" + block
+    except Exception:
+        # Defensive fallback: never fail prompt construction.
+        legacy = _LEGACY_TYPE_BLOCK.get(architecture_type.upper(), _DEPLOYMENT)
+        return _BASE + legacy
+
+
+def layout_for_type(architecture_type: str) -> str | None:
+    """The preferred layout strategy for a type, from its rule pack (for Agent 2)."""
+    try:
+        from . import rules
+
+        return rules.preferred_layout(rules.resolve_type(architecture_type))
+    except Exception:
+        return None
 
 
 # Backwards-compatible default (deployment) for any caller importing SYSTEM_PROMPT.

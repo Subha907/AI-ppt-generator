@@ -22,7 +22,28 @@
     "jobId": { "type": "string", "minLength": 1 },
     "architectureType": {
       "type": "string",
-      "enum": ["BUSINESS", "APPLICATION", "DEPLOYMENT"]
+      "description": "Legacy enum values (BUSINESS/APPLICATION/DEPLOYMENT) or a canonical semantic rule-pack id (e.g. 'deployment.multi_az', 'data.data_flow').",
+      "enum": [
+        "BUSINESS",
+        "APPLICATION",
+        "DEPLOYMENT",
+        "application.context",
+        "application.integration",
+        "application.layered",
+        "application.microservices",
+        "business.capability_map",
+        "business.process_flow",
+        "data.data_flow",
+        "deployment.logical",
+        "deployment.multi_az",
+        "deployment.multi_region",
+        "deployment.network_focused",
+        "devsecops.pipeline",
+        "genai.agentic",
+        "genai.rag",
+        "modernization.current_to_target",
+        "security.security_view"
+      ]
     },
     "title": { "type": "string", "minLength": 1 },
     "assumptions": {

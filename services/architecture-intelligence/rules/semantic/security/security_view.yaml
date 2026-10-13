@@ -1,0 +1,28 @@
+rule_pack:
+  id: security.security_view
+  version: 1.0.0
+  owner: agent_1
+  status: approved
+  extends:
+  - semantic/common.yaml
+classification:
+  trigger_terms:
+  - security architecture
+  - identity
+  - compliance
+required_concerns:
+- identity
+- authentication
+- authorization
+- network_controls
+- encryption
+- key_management
+- audit
+- detection
+conditional_concerns: {}
+prohibited_behavior:
+- claim_compliance_certification
+- invent_security_products
+completeness_checks: []
+renderer_hints:
+  preferred_layout: layered_controls

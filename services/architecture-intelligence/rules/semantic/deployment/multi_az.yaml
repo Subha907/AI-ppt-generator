@@ -1,0 +1,176 @@
+rule_pack:
+  id: deployment.multi_az
+  version: 1.0.0
+  owner: agent_1
+  status: approved
+  extends:
+  - semantic/deployment/logical.yaml
+classification:
+  trigger_terms:
+  - multi-AZ
+  - high availability
+required_concerns:
+- aws_region
+- two_availability_zones
+- internet_connectivity
+- external_actors
+- admin_access
+- ingress
+- compute
+- data
+- database_ha
+- security
+- observability
+- supporting_services
+- cidr_labels
+- key_assumptions
+conditional_concerns:
+  on_prem_connectivity:
+    include_when:
+      evidence_contains_any:
+      - on-premises
+      - on-prem
+      - data center
+      - corporate network
+      - hybrid
+      - Direct Connect
+      - site-to-site VPN
+      - VPN
+    otherwise: omit
+prohibited_behavior:
+- place_global_service_inside_vpc
+- duplicate_regional_service_per_az
+- place_edge_service_in_regional_group
+- direct_inbound_to_private_subnet
+completeness_checks:
+- id: two_az_scopes
+  severity: error
+  condition:
+    count_gte:
+      collection: scopes[type=availability_zone]
+      value: 2
+- id: database_in_isolated_subnet
+  severity: error
+  condition:
+    every: nodes[type=DATABASE]
+    rule: parent_subnet_not_public
+- id: no_empty_subnet
+  severity: warning
+  condition:
+    every: nodes[type=SUBNET]
+    rule: has_child
+- id: has_internet_gateway
+  severity: error
+  condition:
+    exists: nodes[awsService~Internet Gateway]
+- id: has_nat_gateway
+  severity: warning
+  condition:
+    exists: nodes[awsService~NAT Gateway]
+- id: single_load_balancer
+  severity: warning
+  condition:
+    count_lte:
+      collection: nodes[awsService~Application Load Balancer]
+      value: 1
+- id: database_replication_edge
+  severity: warning
+  condition:
+    exists: edges[label~Replication]
+# AWS service vocabulary per concern (canonical choices, AWS reference
+# architecture conventions). The model should prefer these unless evidence
+# names something specific.
+aws_vocabulary:
+  ingress: [Amazon CloudFront, AWS WAF, Application Load Balancer, Amazon Route 53]
+  edge_connectivity: ["Internet Gateway", "NAT Gateway"]
+  compute: [Amazon ECS, Amazon EKS, Amazon EC2, AWS Fargate]
+  data: [Amazon RDS, Amazon Aurora, Amazon DynamoDB, Amazon ElastiCache]
+  storage: [Amazon S3, Amazon EFS]
+  integration: [Amazon API Gateway, Amazon SQS, Amazon SNS, Amazon EventBridge]
+  security: [AWS IAM, AWS KMS, AWS Secrets Manager, AWS WAF, Amazon Cognito, AWS Certificate Manager]
+  observability: [Amazon CloudWatch, AWS CloudTrail, AWS X-Ray, AWS Config]
+  # VPC Endpoints (PrivateLink) live INSIDE the VPC so private/isolated
+  # subnets reach AWS services without traversing the public internet.
+  vpc_endpoints_interface: ["VPC Endpoint (KMS)", "VPC Endpoint (Secrets Manager)", "VPC Endpoint (ECR)", "VPC Endpoint (SQS)"]
+  vpc_endpoints_gateway: ["VPC Endpoint (S3)", "VPC Endpoint (DynamoDB)"]
+# Structural authoring rules folded in from the proven deployment prompt so
+# migrating to rule packs does NOT regress diagram quality.
+authoring_rules:
+  title: "Set the model 'title' to EXACTLY 'Multi-AZ HA AWS Deployment for <Name>' where <Name> is the system/project named in the evidence (e.g. 'Multi-AZ HA AWS Deployment for GemCompass'). If no name is given, use EXACTLY 'Multi-AZ HA AWS Deployment'. Keep it SHORT (<= 7 words). Do NOT prepend 'Production' or '3-Tier Web Application' or any other words - the title must start with 'Multi-AZ HA AWS Deployment'."
+  nesting: "ACCOUNT > REGION > VPC > AVAILABILITYZONE > SUBNET, then place COMPUTE/DATABASE/NETWORK nodes inside a SUBNET via parentId. Put the AWS service name in properties.awsService."
+  region_policy: "Use a SINGLE region by default (multiple AZs). Only multi-region if evidence explicitly requires DR/geo."
+  az_policy: "Use 2 Availability Zones for HA. Each AZ MUST contain the SAME set of WORKLOAD services (compute/db/load-balancer) with distinct ids per AZ. Never leave an AZ or subnet empty."
+  subnet_tiers:
+  - "PUBLIC subnet (label contains 'Public') -> internet-facing/routing only: NAT Gateway (one per AZ public subnet). Do NOT put the ALB inside a single public subnet - see load_balancer rule."
+  - "PRIVATE APP subnet (label contains 'Private App') -> COMPUTE: ECS/EC2."
+  - "ISOLATED DATA subnet (label contains 'Isolated' or 'Database') -> DATABASE: RDS/Aurora/ElastiCache."
+  security_envelope: "A DATABASE node's parentId MUST be an isolated/private data subnet. NEVER parent a DATABASE to a public subnet - databases are never internet-facing."
+  # --- Admin access: Bastion / SSM Session Manager ---
+  admin_access:
+  - "Include a secure admin-access path into the private tiers. Prefer AWS Systems Manager Session Manager (type NETWORK/SERVICE, awsService 'AWS Systems Manager Session Manager') - no public jump box needed."
+  - "If the evidence calls for SSH/RDP jump access, model a Bastion Host (type COMPUTE, awsService 'Bastion Host') in a PUBLIC subnet, with an edge Bastion -> private compute labeled 'SSH/RDP admin'."
+  - "Do not add both a bastion and SSM unless the evidence warrants it - SSM is the modern default."
+  # --- Illustrative network blocks (CIDR) ---
+  cidr_labels:
+  - "Add ILLUSTRATIVE CIDR notations to network containers to meet professional network-spec standards, as properties.cidr: VPC '10.0.0.0/16'; Public Subnet AZ1 '10.0.1.0/24', AZ2 '10.0.2.0/24'; Private App AZ1 '10.0.11.0/24', AZ2 '10.0.12.0/24'; Isolated Data AZ1 '10.0.21.0/24', AZ2 '10.0.22.0/24'."
+  - "These are ILLUSTRATIVE example ranges, NOT invented customer requirements. If the evidence states specific CIDRs, use those instead."
+  # --- Component spec sub-labels (deployment metadata) ---
+  component_specs:
+  - "For key workload nodes add a short spec string as properties.spec, shown as muted sub-text: compute e.g. 'm6i.xlarge | Auto Scaling 2-4'; database e.g. 'db.r6g.xlarge | Multi-AZ'."
+  - "Keep specs generic/illustrative unless the evidence gives exact instance types. Only on primary compute and database nodes - do not clutter every icon."
+  # --- Gap fix 1: internet connectivity (IGW + NAT) ---
+  internet_connectivity:
+  - "Create exactly ONE Internet Gateway (type NETWORK, awsService 'Internet Gateway') as a child of the VPC (parentId = VPC id) - it sits on the VPC boundary, NOT inside a subnet."
+  - "Create ONE NAT Gateway (type NETWORK, awsService 'NAT Gateway') inside EACH public subnet (one per AZ) for resiliency."
+  - "Egress path edges: compute (ECS/EC2) in a private subnet -> its AZ's NAT Gateway -> Internet Gateway -> Internet. Label the compute->NAT edge 'egress'."
+  - "Ingress path: Internet -> Internet Gateway -> ALB -> compute."
+  # --- Gap fix 3: single logical multi-AZ ALB ---
+  load_balancer: "An Application Load Balancer is a SINGLE logical, multi-AZ resource - NOT one per AZ. Model ONE ALB node (type NETWORK/COMPUTE, awsService 'Application Load Balancer') whose parentId is the VPC (or a 'Public Subnets' span), and draw ONE edge from it to the compute tier of EACH AZ. Never create alb-az1 AND alb-az2 as two independent load balancers."
+  # --- Gap fix 2: RDS primary/standby replication ---
+  database_ha:
+  - "In a multi-AZ deployment, the two database nodes are NOT independent: label the AZ1 database 'RDS Primary' and the AZ2 database 'RDS Standby' (Multi-AZ standby)."
+  - "Add ONE replication edge from Primary -> Standby labeled 'Synchronous Replication'. The routing layer renders replication edges as a dashed orange line."
+  # --- Gap fix 4: VPC endpoints (PrivateLink) ---
+  vpc_endpoints:
+  - "INTERFACE endpoints are Elastic Network Interfaces (ENIs) that live INSIDE a PRIVATE APP subnet. Do NOT parent them to the VPC or leave them floating on the VPC boundary."
+  - "KEEP IT SPARSE - EXACTLY ONE per private-app subnet: put ONE 'VPC Endpoint (KMS)' in the AZ1 private-app subnet AND ONE 'VPC Endpoint (KMS)' in the AZ2 private-app subnet. So each private-app subnet holds the ECS/compute node + ONE endpoint icon only. Do NOT add a second endpoint (Secrets Manager/ECR/SQS) into a private-app subnet - a third icon in that lane makes the captions collide."
+  - "Interface endpoint awsService value: 'VPC Endpoint (KMS)' (type NETWORK)."
+  - "GATEWAY endpoints (awsService 'VPC Endpoint (S3)', 'VPC Endpoint (DynamoDB)') are route-table attachments, not ENIs - parent them to the VPC. Include at most ONE if needed."
+  - "Edge pattern: ECS/compute -> VPC Interface Endpoint -> (private access to the AWS service). NEVER draw a line from a private subnet out to an external KMS/S3 group."
+  # --- Left column: External Actors (titled box, outside AWS) (Stage C) ---
+  external_actors:
+  - "Model the human/system request ORIGINS as ACTOR nodes on the far LEFT, outside the AWS Account. Emit AT MOST 3 actors (the left column overflows beyond that). Prefer: 'End Users (Web / Mobile)', 'Customer / Partner (Corporate Network)', and (when the evidence supports it) 'On-Premises Customer Systems (APIs, DB)'. Each ACTOR's label may be two short lines. Do NOT add Developers/Third-party as extra actors unless the evidence specifically centers on them - keep the column to 3."
+  - "ON-PREMISES / CORPORATE DATA CENTER (CONDITIONAL): if the evidence mentions a client on-prem data center, corporate network, hybrid connectivity, VPN, AWS Direct Connect, Site-to-Site VPN, or an on-prem system/identity provider that connects INTO AWS, model it as an EXTERNAL node on the far LEFT named for what the evidence describes (e.g. 'On-Prem Data Center', 'Corporate Network (Direct Connect)', 'On-Prem Active Directory'). parentId = null so it joins the External Actors box. If the evidence names the link type, note it in properties.spec (e.g. 'Direct Connect', 'Site-to-Site VPN'). If the evidence says nothing about on-prem/hybrid connectivity, do NOT invent one."
+  - "All ACTOR/EXTERNAL nodes are children of the ROOT (parentId = null) - the layout engine wraps them in a titled dashed 'External Actors (Outside AWS)' box."
+  - "Primary ingress flows strictly left-to-right: Actors -> Edge services (Route 53 -> CloudFront -> WAF) -> VPC/ALB. External(left) -> Edge -> Cloud(center) -> Supporting(bottom) reading order, no lines doubling back."
+  # --- GLOBAL EDGE services: DO NOT create a separate left EDGE column ---
+  edge_services:
+  - "Do NOT emit Amazon Route 53 or Amazon CloudFront as separate type=EDGE / parentId=null nodes. A separate left-hand edge column overcrowds the External Actors area and makes the ingress lines cross the slide. Keep the left side to the human/system ACTORS only (see external_actors)."
+  - "AWS WAF belongs in the bottom SECURITY group (see supporting_services), NOT as a loose left node. Route 53 (DNS) and CloudFront (CDN) may be mentioned in the Request Flow narrative but should not be drawn as extra left-column icons."
+  - "The primary ingress chain drawn on the diagram is: End Users -> Application Load Balancer -> ECS. WAF/Shield protection is represented by the Security group at the bottom, not by inline edge nodes."
+  # --- Supporting services: TWO cross-cutting bottom boxes (Stage B) ---
+  supporting_services:
+  - "Model cross-cutting regional services (NOT inside a subnet) as TWO separate CONTAINER groups, children of the REGION, rendered as side-by-side titled boxes along the BOTTOM of the region: (1) a SECURITY group holding SECURITY-type nodes, and (2) an OBSERVABILITY/MANAGEMENT group holding OBSERVABILITY-type nodes."
+  - "SECURITY group members (type SECURITY, include those the evidence supports): AWS WAF (DDoS Protection), AWS Shield (DDoS Protection), AWS Secrets Manager (Secrets Management), AWS IAM (Access Control), AWS KMS (Encryption)."
+  - "OBSERVABILITY group members (type OBSERVABILITY): Amazon CloudWatch (Logs & Metrics), AWS X-Ray (Tracing), AWS CloudTrail (Audit Logs). You MAY also include Amazon SNS (Notifications) and Amazon SQS (Async) here if the evidence supports them."
+  - "Each supporting node SHOULD carry a short properties.spec describing its role in parentheses-style wording (e.g. 'DDoS Protection', 'Secrets Management', 'Logs & Metrics', 'Tracing', 'Audit Logs')."
+  - "Do NOT merge these into one box and do NOT also draw them as a right-hand column. KMS / Secrets Manager may ALSO be reached via VPC endpoints inside the private subnets (that is a separate, in-VPC concern)."
+  edge_consolidation:
+  - "MANDATORY: any node in a REGIONAL GROUP container ('Security & Identity', 'Management & Governance', 'Application Services') that relates to workloads MUST connect ONCE to a CONTAINER/SUBNET/VPC id - NEVER draw a separate edge to each ECS/RDS/ALB leaf, and NEVER to the duplicate in each AZ. One edge to the container, not N edges to leaves."
+  - "This applies regardless of the node's 'type' (SERVICE, SECURITY, OBSERVABILITY, etc.): if it lives in a right-hand group and touches the VPC, it terminates on a container."
+  - "Ingress: CloudFront -> WAF -> VPC (or parent Public Subnet row), not to individual ALBs."
+  - "STRICT 3-TIER INGRESS: the ONLY node that may send traffic INTO a Private App subnet / its compute is the Application Load Balancer (which sits in the public tier). NEVER draw an edge from an external/edge service, the Internet, or a right-hand group directly into a private-app or isolated subnet. External -> WAF -> ALB (public) -> ECS (private) is the only inbound chain."
+  - "Core workload: leaf-to-leaf within an AZ is fine and expected (ecs-az1 -> rds-az1; ecs-az2 -> rds-az2)."
+  - "KMS / Secrets Manager / S3 / ECR access from private/isolated subnets goes through a VPC ENDPOINT node inside the VPC (see vpc_endpoints rule), NOT a line to the external Security/Application group."
+  - "IAM (control-plane authz) -> the 'Private App Subnet' container (one edge at most); CloudWatch/CloudTrail/X-Ray/Config -> the VPC container ONCE each."
+  - "An edge target MAY (and often SHOULD) be a CONTAINER/SUBNET/VPC id when consolidating at tier level."
+  edge_budget: "Keep the TOTAL edge count small and readable - aim for <= 20 edges on one slide. Prefer one consolidated edge over many parallel ones. A dense mesh of cross-column lines is a defect."
+  edge_labels: "Keep labels very short (e.g. 'HTTPS', 'IAM Auth', 'TCP 5432', 'Logs')."
+  # --- Key Assumptions (Stage E): populate the model-level assumptions[] ---
+  key_assumptions:
+  - "Populate the top-level assumptions[] array (2-4 items) capturing design decisions the evidence did not fully specify. The layout renders them as a 'Key Assumptions' box in the top-right."
+  - "Typical assumptions: 'Single AWS region with two AZs; cross-region DR not required per evidence.'; 'Illustrative CIDR ranges per AZ/subnet tier; actual ranges confirmed during implementation.'; 'AWS Systems Manager Session Manager for secure admin access; no bastion host required unless evidence specifies.'"
+  - "Each assumption item is {id, text, approved:false}. Keep each text to one concise sentence."
+renderer_hints:
+  preferred_layout: multi_az_columns
+  regional_services_position: above_az_columns

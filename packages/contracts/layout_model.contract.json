@@ -10,6 +10,12 @@
     "projectId": { "type": "string", "minLength": 1 },
     "jobId": { "type": "string", "minLength": 1 },
     "title": { "type": "string" },
+    "assumptions": {
+      "type": "array",
+      "default": [],
+      "items": { "type": "string" },
+      "description": "Key design assumptions, rendered as a top-right box by Agent 3."
+    },
     "slide": {
       "type": "object",
       "additionalProperties": false,
@@ -57,6 +63,21 @@
             "type": ["string", "null"],
             "default": null,
             "description": "Carried through from the architecture node type for styling."
+          },
+          "cidr": {
+            "type": ["string", "null"],
+            "default": null,
+            "description": "Illustrative network block for a container, e.g. '10.0.0.0/16'. Rendered as a muted sub-label."
+          },
+          "spec": {
+            "type": ["string", "null"],
+            "default": null,
+            "description": "Deployment spec for a leaf node, e.g. 'm6i.xlarge | Auto Scaling 2-4'. Rendered as muted sub-text."
+          },
+          "labelMaxW": {
+            "type": ["number", "null"],
+            "default": null,
+            "description": "Max caption-box width (inches) for a leaf icon, set when a lane holds multiple icons so adjacent captions do not overlap."
           }
         }
       }

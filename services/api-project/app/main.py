@@ -16,6 +16,7 @@ import time
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 
+from . import catalog as catalog_mod
 from . import knowledge_base as kb
 from . import repository as repo
 from . import storage
@@ -24,6 +25,7 @@ from .aws import SSOAuthError, verify_sso
 from .config import get_settings
 from .ids import new_document_id, new_job_id, new_project_id
 from .models import (
+    ArchitectureCategory,
     CompleteUploadRequest,
     CreateProjectRequest,
     DocumentResponse,
@@ -72,6 +74,18 @@ def healthz():
     except SSOAuthError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"status": "ok", "aws": who}
+
+
+# --- Architecture-type catalog (diagram-type picker) -----------------------
+@app.get(f"{API_PREFIX}/architecture-types", response_model=list[ArchitectureCategory])
+def architecture_types():
+    """Return the selectable diagram types as category -> sub-types.
+
+    Derived live from the semantic rule packs, so a UI can populate a
+    category dropdown and a dependent sub-category dropdown. Adding a new
+    rule-pack YAML automatically adds an option here.
+    """
+    return catalog_mod.catalog()
 
 
 # --- Projects --------------------------------------------------------------
@@ -263,6 +277,15 @@ def start_slide_job(
     except repo.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    # Resolve the user's selection (category + subCategory, or a legacy word /
+    # direct pack id) to a canonical rule-pack id via the catalog.
+    try:
+        resolved_type = catalog_mod.resolve(
+            body.category, body.subCategory, body.architectureType
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     # Idempotency: a repeated key returns the original job instead of a new one.
     if idempotency_key:
         req_hash = hashlib.sha256(
@@ -277,7 +300,7 @@ def start_slide_job(
     job = repo.create_job(
         project_id=project_id,
         job_id=job_id,
-        architecture_type=body.architectureType,
+        architecture_type=resolved_type,
         document_ids=body.documentIds,
         instruction=body.instruction,
         slide_profile=body.slideProfile,

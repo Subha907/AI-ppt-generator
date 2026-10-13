@@ -224,13 +224,15 @@ def update_document_status(
 def create_job(
     project_id: str,
     job_id: str,
-    architecture_type: ArchitectureType,
+    architecture_type: str,
     document_ids: list[str],
     instruction: str,
     slide_profile: str,
     output_format: str,
     execution_arn: str | None = None,
 ) -> dict[str, Any]:
+    """architecture_type is the resolved rule-pack id (e.g.
+    'deployment.network_focused') or a legacy family word."""
     now = utcnow()
     item = {
         "PK": _project_pk(project_id),
@@ -238,7 +240,7 @@ def create_job(
         "entity": "JOB",
         "projectId": project_id,
         "jobId": job_id,
-        "architectureType": architecture_type.value,
+        "architectureType": architecture_type,
         "documentIds": document_ids,
         "instruction": instruction,
         "slideProfile": slide_profile,

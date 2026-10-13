@@ -1,0 +1,31 @@
+rule_pack:
+  id: modernization.current_to_target
+  version: 1.0.0
+  owner: agent_1
+  status: approved
+  extends:
+  - semantic/common.yaml
+classification:
+  trigger_terms:
+  - current state
+  - target state
+  - modernization roadmap
+required_concerns:
+- current_state
+- constraints
+- transition_patterns
+- target_state
+- migration_waves
+- dependencies
+conditional_concerns: {}
+prohibited_behavior:
+- remove_current_constraints
+- present_transition_as_target
+- invent_timeline
+completeness_checks: []
+renderer_hints:
+  preferred_layout: current_to_target
+  columns:
+  - current
+  - transition
+  - target

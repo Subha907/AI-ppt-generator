@@ -1,0 +1,28 @@
+rule_pack:
+  id: application.microservices
+  version: 1.0.0
+  owner: agent_1
+  status: approved
+  extends:
+  - semantic/application/layered.yaml
+classification:
+  trigger_terms:
+  - microservices
+  - service decomposition
+required_concerns:
+- service_boundaries
+- responsibilities
+- api_or_event_contracts
+- data_ownership
+conditional_concerns: {}
+prohibited_behavior:
+- create_service_per_noun_without_domain_evidence
+- use_shared_database_as_default
+completeness_checks:
+- id: service_responsibilities
+  severity: error
+  condition:
+    every: components[category=microservice]
+    rule: role_present
+renderer_hints:
+  preferred_layout: domain_grouped_layers

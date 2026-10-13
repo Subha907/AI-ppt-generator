@@ -1,0 +1,31 @@
+rule_pack:
+  id: application.context
+  version: 1.0.0
+  owner: agent_1
+  status: approved
+  extends:
+  - semantic/common.yaml
+classification:
+  trigger_terms:
+  - system context
+  - application context
+  - ecosystem
+required_concerns:
+- system_of_interest
+- human_actors
+- external_systems
+- directional_interfaces
+conditional_concerns:
+  identity_provider:
+    include_when:
+      evidence_contains_any:
+      - SSO
+      - OAuth
+      - OIDC
+      - SAML
+prohibited_behavior:
+- show_subnet_or_az_details
+- invent_external_systems
+completeness_checks: []
+renderer_hints:
+  preferred_layout: hub_and_spoke

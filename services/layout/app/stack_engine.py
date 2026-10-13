@@ -92,6 +92,8 @@ class Box:
     label: str
     aws_service: str | None
     parent_id: str | None
+    cidr: str | None = None   # illustrative network block, e.g. '10.0.0.0/16'
+    spec: str | None = None   # deployment spec, e.g. 'm6i.xlarge | Auto Scaling 2-4'
     children: list["Box"] = field(default_factory=list)
     depth: int = 0
     x: float = 0.0
@@ -118,6 +120,11 @@ _GROUP_FOR_TYPE = {
 _CONTAINER_TYPES_LOCAL = {
     "CONTAINER", "ACCOUNT", "REGION", "VPC", "AVAILABILITYZONE", "SUBNET",
 }
+# External actors / systems AND global edge services (Route 53, CloudFront,
+# WAF) are the far-LEFT column. They must NOT be bucketed into an "Application
+# Services" group - the absolute-swimlane pass places them in a dedicated left
+# column outside the region (users -> edge -> VPC left-to-right order).
+_EXTERNAL_LEFT_TYPES = {"ACTOR", "EXTERNAL", "EDGE"}
 
 
 def _auto_group_loose_services(nodes: list[dict]) -> list[dict]:
@@ -129,14 +136,20 @@ def _auto_group_loose_services(nodes: list[dict]) -> list[dict]:
     """
     by_id = {n["id"]: n for n in nodes}
     # A parent is a "bare" structural container (services here should be
-    # grouped into a labeled box rather than floating).
-    bare_parent_types = {"REGION", "ACCOUNT", "VPC"}
+    # grouped into a labeled box rather than floating). NOTE: VPC is NOT bare -
+    # VPC-direct leaves (Internet Gateway, the single multi-AZ ALB, VPC
+    # endpoints) are legitimate VPC-scoped infrastructure and must stay inside
+    # the VPC boundary, placed in the VPC-leaf band by the absolute-swimlane
+    # pass - not pulled out into a right-hand "Application Services" group.
+    bare_parent_types = {"REGION", "ACCOUNT"}
     new_groups: dict[tuple[str, str], dict] = {}  # (parentId, groupKey) -> node
     changed = False
 
     for n in nodes:
         if n.get("type") in _CONTAINER_TYPES_LOCAL:
             continue
+        if n.get("type") in _EXTERNAL_LEFT_TYPES:
+            continue  # external actors go to the left column, not a group
         pid = n.get("parentId")
         parent = by_id.get(pid) if pid else None
         if not parent or parent.get("type") not in bare_parent_types:
@@ -263,12 +276,15 @@ def _build_forest(nodes: list[dict]) -> list[Box]:
     nodes = _auto_group_loose_services(nodes)
     by_id: dict[str, Box] = {}
     for n in nodes:
+        props = n.get("properties") or {}
         by_id[n["id"]] = Box(
             node_id=n["id"],
             node_type=n.get("type", "COMPONENT"),
             label=n.get("label", n["id"]),
-            aws_service=(n.get("properties") or {}).get("awsService"),
+            aws_service=props.get("awsService"),
             parent_id=n.get("parentId"),
+            cidr=props.get("cidr"),
+            spec=props.get("spec"),
         )
     roots: list[Box] = []
     for b in by_id.values():
@@ -529,8 +545,12 @@ def _scrub_spatial(model: dict) -> dict:
 # Inner content bounds: the slide safe area (0.3..13.033 / 0.3..7.2) minus room
 # for the ACCOUNT + REGION wrapper borders (each insets ~0.15-0.3) and the
 # auto-correct 0.15 padding, so grown wrappers still land inside the safe area.
-_ABS_LEFT = 0.95         # left edge of the VPC cluster (account+region to its left)
-_ABS_RIGHT = 12.5        # right edge available to child content
+_ABS_LEFT = 0.6          # left edge of the VPC cluster (account+region to its left)
+# The right strip (~3.2in) is reserved for the description-panel column (Key
+# Assumptions / Request Flow / Legend) that Agent 3 draws on the right. Diagram
+# content must stop short of it so nothing overlaps the panels.
+_PANEL_COL_W = 2.85      # Request Flow rail (2.65) + right margin (0.15) + small gap
+_ABS_RIGHT = 13.333 - _PANEL_COL_W   # ~10.48: right edge available to diagram content
 _ABS_TOP = 0.85          # below the slide-title strip
 _ABS_BOTTOM = 7.2        # slide safe-margin bottom
 _VPC_WIDTH_FRAC = 0.52   # VPC cluster ~52%; leaves a wide gap for the routing
@@ -584,19 +604,159 @@ def _apply_absolute_swimlanes(objects: list[dict]) -> None:
     for o in objects:
         children_of.setdefault(o.get("parentObjectId"), []).append(o)
 
-    # --- 1. VPC cluster occupies the left column in absolute coords ----------
-    usable_w = _ABS_RIGHT - _ABS_LEFT
-    vpc_x = _ABS_LEFT                # account/region wrappers grow to its left
-    vpc_w = usable_w * _VPC_WIDTH_FRAC
-    vpc_top = _LANE_TOP - 0.55       # room for VPC + AZ title strips above lanes
-    vpc_bottom = _LANE_BOTTOM + 0.25
+    # VPC-level LEAF nodes (Internet Gateway, the single multi-AZ ALB, VPC
+    # endpoints) are direct children of the VPC, not inside any AZ. They get a
+    # dedicated horizontal band at the top of the VPC, above the AZ columns.
+    vpc_leaves = [
+        c for c in children_of.get(vpc["objectId"], [])
+        if c.get("kind") == "ICON_LABEL"
+        and c.get("nodeType") not in _EXTERNAL_LEFT_TYPES
+    ]
+    # The VPC-leaf band sits between the VPC title and the first (public) lane.
+    # It occupies a slim strip; the three subnet lanes are COMPRESSED to make
+    # room (keeping their alignment) rather than overflowing the canvas.
+    # With interface endpoints now moved into the private subnets (ENIs) and
+    # edge services on the left, the band holds only a few nodes (IGW, ALB,
+    # gateway endpoints) so it can be a touch taller/clearer without crowding.
+    # Band height must clear the icon (0.36) + its title gap (0.30) + the label
+    # text drawn BELOW the icon (~0.26) so band labels never overlap the AZ
+    # title strips directly beneath. 1.05in gives that clearance.
+    vpc_band_h = 0.92 if vpc_leaves else 0.0
+    vpc_leaf_size = 0.36
+
+    # External-left column: ACTOR/EXTERNAL (users, on-prem) AND global EDGE
+    # services (Route 53, CloudFront, WAF) sit in a dedicated column on the far
+    # left, in request order (users first, then edge services) so the primary
+    # flow reads strictly left-to-right into the VPC.
+    def _left_order(o: dict) -> int:
+        # Users first, then edge services roughly in DNS->CDN->WAF order.
+        nt = o.get("nodeType")
+        lbl = (o.get("label") or "").lower()
+        if nt in ("ACTOR", "EXTERNAL"):
+            return 0
+        if "route 53" in lbl or "route53" in lbl or "dns" in lbl:
+            return 1
+        if "cloudfront" in lbl or "cdn" in lbl:
+            return 2
+        if "waf" in lbl:
+            return 3
+        return 4
+
+    external_left = sorted(
+        [o for o in objects
+         if o.get("nodeType") in _EXTERNAL_LEFT_TYPES
+         and o.get("kind") == "ICON_LABEL"],
+        key=_left_order,
+    )
+    # Wide enough for the 'External Actors (Outside AWS)' title to render in
+    # full inside its dashed box (the box spans this column).
+    _ACTORS_BOX_W = 1.85
+    # Gap must clear the account/region wrapper insets (~0.3in total) that grow
+    # leftward toward the VPC, plus a visible margin, so the box never overlaps
+    # the account after the white-space scale compresses the gap.
+    ext_col_w = (_ACTORS_BOX_W + 0.85) if external_left else 0.0
+
+    # --- 1. VPC cluster occupies the center zone in absolute coords ---------
+    # Supporting services now live in a BOTTOM strip (Stage B), not a right
+    # column, so the VPC uses nearly the full usable width to the right of the
+    # external-actors column.
+    usable_w = _ABS_RIGHT - _ABS_LEFT - ext_col_w
+    vpc_x = _ABS_LEFT + ext_col_w    # leave room for the external-actors column
+    vpc_w = usable_w * 0.97
+
+    # Place external-left nodes in their column, vertically distributed in
+    # request order (top to bottom): users, then Route 53, CloudFront, WAF.
+    if external_left:
+        # Centre each actor icon horizontally within the actors box column so
+        # the wider titled box reads cleanly (box spans _ABS_LEFT..+box_w).
+        ex_x = _ABS_LEFT + (_ACTORS_BOX_W - ICON_SIZE) / 2
+        n_e = len(external_left)
+        band_top = _LANE_TOP - 0.2
+        band_h = (_LANE_BOTTOM - _LANE_TOP) + 0.4
+        step = band_h / max(1, n_e)
+        for i, ex in enumerate(external_left):
+            ex["w"], ex["h"] = ICON_SIZE, ICON_SIZE
+            ex["x"] = round(ex_x, 3)
+            ex["y"] = round(band_top + i * step + (step - ICON_SIZE) / 2, 3)
+    # Clamp the VPC top so account/region wrappers never breach the top margin.
+    vpc_top = max(_ABS_TOP + 0.25, _LANE_TOP - 0.3)
     vpc["x"], vpc["w"] = round(vpc_x, 3), round(vpc_w, 3)
-    vpc["y"], vpc["h"] = round(vpc_top, 3), round(vpc_bottom - vpc_top, 3)
+    vpc["y"] = round(vpc_top, 3)  # height set after lanes are positioned below
+
+    # --- 1b. Place VPC-level leaf nodes in the top band ----------------------
+    if vpc_leaves:
+        band_y = vpc_top + 0.30  # below the VPC title strip, above the AZ columns
+        n_l = len(vpc_leaves)
+        band_inner = vpc_w - 2 * _SUBNET_INSET
+        sp = max(0.12, (band_inner - n_l * vpc_leaf_size) / (n_l + 1))
+        for j, lf in enumerate(vpc_leaves):
+            lf["x"] = round(vpc_x + _SUBNET_INSET + sp + j * (vpc_leaf_size + sp), 3)
+            lf["y"] = round(band_y, 3)
+            lf["w"], lf["h"] = vpc_leaf_size, vpc_leaf_size
+
+    # Does the region have supporting groups that will become a bottom strip?
+    _has_support_strip = any(
+        o.get("nodeType") == "CONTAINER"
+        and o["objectId"] != vpc["objectId"]
+        and o.get("parentObjectId") in (
+            (next((r["objectId"] for r in objects if r.get("nodeType") == "REGION"), None)),
+            vpc["objectId"],
+        )
+        for o in objects
+    )
+
+    # When a VPC band exists, the three lanes are repositioned into the space
+    # below the band and above the canvas bottom (compressed but still aligned).
+    # _lane_y maps a role -> absolute lane Y, computed once here.
+    az_top = (_LANE_TOP - 0.3) + vpc_band_h
+    # Leave room below the AZ box for wrapper insets + auto-correct padding, and
+    # for the bottom supporting-services strip (~1.35in) when present.
+    _strip_reserve = 1.5 if _has_support_strip else 0.0
+    canvas_bottom = _ABS_BOTTOM - 0.65 - _strip_reserve
+    # A subnet lane must be tall enough to stack, inside its box, WITHOUT
+    # overlap: the title strip, the icon, and the caption drawn below it.
+    # Budget it compactly - the global white-space scale shrinks everything, so
+    # an over-tall lane here just forces a smaller overall scale (tiny icons +
+    # colliding labels). Keep the floor tight; the spec sub-line is optional and
+    # only on a couple of nodes, so it is NOT reserved for every lane.
+    #   title (0.24) + top gap (0.06) + icon (0.5) + label gap (0.04)
+    #   + 2-line label (~0.30) + bottom pad (0.06) ~= 1.20in
+    # Icon sits well below the subnet title strip. This offset is applied in
+    # PRE-scale space and the compiler's title strip is a FIXED 0.22in; the
+    # cluster is later shrunk to ~0.7x, so the icon's post-scale clearance is
+    # ~0.38*0.7 = 0.27 > 0.22 and the strip never overlaps the icon/caption.
+    _SUBNET_TITLE_H = 0.4
+    _ICON_TOP_GAP = 0.06
+    _LABEL_BLOCK_H = 0.30           # 2 label lines
+    _LANE_MIN_H = round(
+        _SUBNET_TITLE_H + _ICON_TOP_GAP + ICON_SIZE + 0.04 + _LABEL_BLOCK_H + 0.06, 3
+    )  # ~1.20
+    if vpc_band_h:
+        first_cy = az_top + 0.32          # first lane top, just below AZ title
+        # Fit 3 lanes + 2 inter-lane gaps into the available vertical space.
+        # Derive lane height from the space so lanes never overlap after the
+        # later white-space scale (which shrinks uniformly, preserving gaps),
+        # but never below the min needed for icon + label to fit inside the box.
+        _LANE_GAP = 0.18
+        avail = canvas_bottom - first_cy
+        lane_h = max(_LANE_MIN_H, (avail - 2 * _LANE_GAP) / 3)
+        step = lane_h + _LANE_GAP
+        _lane_y = {
+            "public": round(first_cy, 3),
+            "compute": round(first_cy + step, 3),
+            "data": round(first_cy + 2 * step, 3),
+        }
+        az_bottom = first_cy + 2 * step + lane_h + 0.1
+    else:
+        _lane_y = {r: _SWIMLANE[r]["y"] for r in ("public", "compute", "data")}
+        lane_h = max(_LANE_MIN_H, _SWIMLANE["public"]["h"])
+        az_bottom = _LANE_BOTTOM + 0.15
+
+    # Now that the lane extent is known, size the VPC to enclose everything.
+    vpc["h"] = round((az_bottom + 0.15) - vpc["y"], 3)
 
     # --- 2. AZs as equal-width columns spanning all lanes --------------------
     n_az = len(azs)
-    az_top = _LANE_TOP - 0.3
-    az_bottom = _LANE_BOTTOM + 0.15
     inner_left = vpc_x + _SUBNET_INSET
     inner_w = vpc_w - 2 * _SUBNET_INSET
     az_w = (inner_w - _AZ_GAP * (n_az - 1)) / n_az
@@ -614,69 +774,302 @@ def _apply_absolute_swimlanes(objects: list[dict]) -> None:
             role = _subnet_role(
                 sn.get("label", ""), [c.get("nodeType", "") for c in kids]
             )
-            lane = _SWIMLANE[role]
             sn["x"], sn["w"] = round(sub_x, 3), round(sub_w, 3)
-            sn["y"], sn["h"] = lane["y"], lane["h"]
+            sn["y"], sn["h"] = _lane_y[role], round(lane_h, 3)
 
             # --- 4. Rule 2.3: dynamic icon spacing inside the subnet ---------
             icons = [c for c in kids if c.get("kind") == "ICON_LABEL"]
             n = len(icons)
             if n == 0:
                 continue
-            spacing = max(0.05, (sub_w - n * ICON_SIZE) / (n + 1))
-            icon_y = sn["y"] + (sn["h"] - ICON_SIZE) / 2
+            # Shrink icons to fit when a lane is crowded (e.g. ECS + several
+            # interface endpoints in one private subnet) so they never overflow
+            # the subnet width and trigger auto-correct growth / AZ overlap.
+            isz = ICON_SIZE
+            min_gap = 0.08
+            if (n * isz + (n + 1) * min_gap) > sub_w:
+                isz = max(0.3, (sub_w - (n + 1) * min_gap) / n)
+            spacing = max(min_gap, (sub_w - n * isz) / (n + 1))
+            # Place the icon just BELOW the subnet title strip (not vertically
+            # centred) so the caption drawn beneath the icon still lands inside
+            # the subnet box instead of spilling over the bottom border.
+            icon_y = sn["y"] + _SUBNET_TITLE_H + _ICON_TOP_GAP
+            # Per-icon horizontal slot: the caption drawn under each icon must
+            # NOT exceed this width or it collides with the neighbouring icon's
+            # caption when a lane holds 2+ icons. The compiler/preview clamp the
+            # label box to labelMaxW (slot pitch, minus a small gutter).
+            slot_pitch = isz + spacing
+            label_max_w = round(max(isz, slot_pitch - 0.08), 3)
             for j, ic in enumerate(icons):
-                ic["x"] = round(sub_x + spacing + j * (ICON_SIZE + spacing), 3)
+                ic["x"] = round(sub_x + spacing + j * (isz + spacing), 3)
                 ic["y"] = round(icon_y, 3)
-                ic["w"], ic["h"] = ICON_SIZE, ICON_SIZE
+                ic["w"], ic["h"] = round(isz, 3), round(isz, 3)
+                ic["labelMaxW"] = label_max_w
 
     # --- 5. Reflow sibling group CONTAINERs into the right-hand column -------
+    # Groups can be parented to the REGION (standard) OR synthesized by the
+    # engine and parented to the VPC (loose-service auto-grouping). Collect
+    # BOTH, re-parent any VPC-level groups to the region, and reflow them all
+    # into the right column so they never overlap the AZ columns.
     region = next((o for o in objects if o.get("nodeType") == "REGION"), None)
     region_id = region["objectId"] if region else vpc.get("parentObjectId")
-    groups = [c for c in children_of.get(region_id, [])
-              if c.get("nodeType") == "CONTAINER"
-              and c["objectId"] != vpc["objectId"]]
+    groups = [
+        o for o in objects
+        if o.get("nodeType") == "CONTAINER"
+        and o["objectId"] != vpc["objectId"]
+        and o.get("parentObjectId") in (region_id, vpc["objectId"])
+    ]
+    for g in groups:
+        if g.get("parentObjectId") == vpc["objectId"]:
+            g["parentObjectId"] = region_id
+    # Cross-cutting groups (Security & Identity, Management/Observability, etc.)
+    # are laid out as SIDE-BY-SIDE titled boxes along the BOTTOM of the region
+    # (below the AZ columns), matching the reference's 'Security Group' +
+    # 'Observability Group' pair. Each group keeps its own container + icons;
+    # empty groups are dropped. Up to 3 across; icons wrap to rows within a box.
+    strip_boxes: list[dict] = []
     if groups:
-        # Leave a wide gap between the VPC and the group column so the
-        # cross-column routing corridor has room for parallel vertical tracks
-        # (remediation: EXCESSIVE_CROSSINGS). ~1.4in holds ~16 tracks legibly.
-        col_x = vpc_x + vpc_w + 1.4
-        col_w = _ABS_RIGHT - col_x
-        n_g = len(groups)
-        col_top = _LANE_TOP - 0.3
-        col_h_total = _LANE_BOTTOM + 0.15 - col_top
-        g_h = (col_h_total - 0.3 * (n_g - 1)) / n_g
-        for i, g in enumerate(groups):
-            g_y = col_top + i * (g_h + 0.3)
-            old_x, old_y, old_w = g["x"], g["y"], g["w"]
-            g["x"], g["w"] = round(col_x, 3), round(col_w, 3)
-            g["y"], g["h"] = round(g_y, 3), round(g_h, 3)
-            # Shift the group's icon children to follow the box (keep relative
-            # offset within the box, then re-space horizontally if they overflow).
-            gkids = [c for c in children_of.get(g["objectId"], [])
+        # Keep only groups that actually have leaf icons.
+        populated = []
+        for g in groups:
+            icons = [c for c in children_of.get(g["objectId"], [])
                      if c.get("kind") == "ICON_LABEL"]
-            ng = len(gkids)
-            if ng:
-                sp = max(0.05, (col_w - ng * ICON_SIZE) / (ng + 1))
-                icy = g_y + (g_h - ICON_SIZE) / 2
-                for j, ic in enumerate(gkids):
-                    ic["x"] = round(col_x + sp + j * (ICON_SIZE + sp), 3)
-                    ic["y"] = round(icy, 3)
-                    ic["w"], ic["h"] = ICON_SIZE, ICON_SIZE
+            if icons:
+                populated.append((g, icons))
+        # Drop empty group containers from the object list entirely.
+        keep_ids = {g["objectId"] for g, _ in populated}
+        drop_ids = {g["objectId"] for g in groups if g["objectId"] not in keep_ids}
+        if drop_ids:
+            objects[:] = [o for o in objects if o["objectId"] not in drop_ids]
+
+        if populated:
+            # Give the standard groups cleaner cross-cutting titles.
+            _TITLE_MAP = {
+                "security": "Security Group (Cross-Cutting)",
+                "management": "Observability Group (Cross-Cutting)",
+            }
+            for g, _ in populated:
+                oid = g["objectId"].lower()
+                lbl = (g.get("label") or "").lower()
+                if "secur" in oid or "secur" in lbl or "identity" in lbl:
+                    g["label"] = _TITLE_MAP["security"]
+                elif ("manage" in oid or "observ" in lbl or "governance" in lbl
+                      or "monitor" in lbl):
+                    g["label"] = _TITLE_MAP["management"]
+
+            n_g = len(populated)
+            # Clear gap below the VPC bottom (vpc ends at az_bottom+0.15) so the
+            # group boxes never touch the VPC border after the white-space scale.
+            row_top = az_bottom + 0.5
+            row_h = 1.05
+            band_w = vpc_w
+            ggap = 0.5
+            box_w = (band_w - ggap * (n_g - 1)) / n_g
+            for gi, (g, icons) in enumerate(populated):
+                gx = vpc_x + gi * (box_w + ggap)
+                g["x"], g["w"] = round(gx, 3), round(box_w, 3)
+                g["y"], g["h"] = round(row_top, 3), round(row_h, 3)
+                strip_boxes.append(g)
+                # Lay this group's icons in a centred horizontal row (wrapping
+                # to a second row if there are many).
+                inner = box_w - 2 * _SUBNET_INSET
+                per_row = max(1, min(len(icons), int(inner / 0.72)))
+                isz = min(ICON_SIZE, max(0.3,
+                          (inner - (per_row + 1) * 0.12) / per_row))
+                sp = max(0.1, (inner - per_row * isz) / (per_row + 1))
+                slot_pitch = isz + sp
+                # Clamp captions to the per-icon slot so adjacent group-icon
+                # labels never collide, and drop the spec sub-line here (these
+                # boxes are dense - name only keeps them readable).
+                label_max_w = round(max(isz, slot_pitch - 0.06), 3)
+                icy0 = row_top + 0.32
+                for k, ic in enumerate(icons):
+                    r, cidx = divmod(k, per_row)
+                    ic["x"] = round(gx + _SUBNET_INSET + sp + cidx * (isz + sp), 3)
+                    ic["y"] = round(icy0 + r * (isz + 0.34), 3)
+                    ic["w"], ic["h"] = round(isz, 3), round(isz, 3)
+                    ic["labelMaxW"] = label_max_w
+                    ic.pop("spec", None)   # name-only in dense group boxes
+        az_bottom_with_strip = (strip_boxes[0]["y"] + strip_boxes[0]["h"]
+                                if strip_boxes else az_bottom)
+    else:
+        az_bottom_with_strip = az_bottom
+
+    # --- 5b. External Actors titled box (Stage C) ---------------------------
+    # Wrap the left-column ACTOR/EXTERNAL/EDGE nodes in a synthetic dashed
+    # 'External Actors (Outside AWS)' container so they read as a labeled zone.
+    actors_box = None
+    if external_left:
+        # Box spans the fixed-width actors column so its title fits in full.
+        ax0 = _ABS_LEFT
+        ay0 = min(e["y"] for e in external_left) - 0.45  # room for the title
+        ax1 = _ABS_LEFT + _ACTORS_BOX_W
+        ay1 = max(e["y"] + e["h"] for e in external_left) + 0.18
+        actors_box = {
+            "objectId": "external-actors-box",
+            "kind": "CONTAINER",
+            "nodeType": "EXTERNAL_GROUP",
+            "label": "External Actors (Outside AWS)",
+            "parentObjectId": None,
+            "x": round(ax0, 3), "y": round(ay0, 3),
+            "w": round(ax1 - ax0, 3), "h": round(ay1 - ay0, 3),
+            "z": 0,
+        }
+        objects.append(actors_box)
+        # Reparent the actor icons INTO the box so the validator treats them as
+        # contained children (not overlapping siblings).
+        for e in external_left:
+            e["parentObjectId"] = "external-actors-box"
 
     # --- 6. Grow Account/Region wrappers to contain everything (Rule 8) ------
-    cluster = [vpc] + azs + groups if groups else [vpc] + azs
-    for wrapper_type, inset in (("REGION", 0.12), ("ACCOUNT", 0.15)):
+    # The REGION/ACCOUNT wrap the VPC + the bottom cross-cutting group boxes.
+    # The external actors box sits OUTSIDE both boundaries, to the left.
+    region_members = [vpc] + azs + strip_boxes
+    region_cluster = region_members
+    # Pre-scale insets are slightly larger than the validator's MIN_PADDING
+    # (0.15) because the cluster is shrunk by the white-space scale afterwards.
+    for wrapper_type, inset in (("REGION", 0.2), ("ACCOUNT", 0.22)):
         w = next((o for o in objects if o.get("nodeType") == wrapper_type), None)
         if not w:
             continue
+        cluster = region_cluster
         left = min(c["x"] for c in cluster) - inset
         top = min(c["y"] for c in cluster) - inset - 0.3  # title strip
         right = max(c["x"] + c["w"] for c in cluster) + inset
         bottom = max(c["y"] + c["h"] for c in cluster) + inset
         w["x"], w["y"] = round(left, 3), round(top, 3)
         w["w"], w["h"] = round(right - left, 3), round(bottom - top, 3)
-        cluster = cluster + [w]
+        region_cluster = region_cluster + [w]
+
+    # --- 7. 30% white-space rule -------------------------------------------
+    # Professional presentation design wants >= 30% of the slide empty. The
+    # absolute layout above fills most of the canvas, so shrink the whole
+    # deployment cluster uniformly about the slide centre until it occupies at
+    # most WHITE_SPACE_FILL of each dimension, then re-centre it. This keeps the
+    # locked-lane proportions and alignment intact - it only scales + centres.
+    _apply_white_space_margin(objects)
+
+
+# Target: content occupies at most this fraction of each axis.
+WHITE_SPACE_FILL = 0.98
+_SLIDE_W = 13.333
+_SLIDE_H = 7.5
+_CONTENT_LEFT = 0.35   # left slide margin (just inside the 0.3 safe area)
+# The diagram cluster is confined to the LEFT of the right-hand description
+# panel column (Agent 3 draws panels from ~10.4in rightward). Centre the
+# cluster within [_CONTENT_LEFT, _CONTENT_RIGHT] so it never overlaps panels.
+_CONTENT_RIGHT = 13.333 - _PANEL_COL_W + 0.05   # ~10.43
+_CONTENT_TOP = 0.52   # below the slide title
+# Keep the scaled cluster's bottom within the validator safe area (7.2). Leave
+# ~0.35in headroom because validate()'s auto_correct grows the REGION then the
+# ACCOUNT wrapper by MIN_PADDING (0.15 each) to contain the bottom group boxes,
+# which would otherwise push the account past the safe area.
+_CONTENT_BOTTOM = 6.6
+
+
+def _apply_white_space_margin(objects: list[dict]) -> None:
+    """Scale + centre all objects so the diagram leaves professional margins.
+
+    Scales uniformly so the bounding box of all objects fits within the usable
+    content band - which is the slide MINUS the right-hand description-panel
+    column - then re-centres it there. Never scales UP (only shrinks).
+    """
+    if not objects:
+        return
+    minx = min(o["x"] for o in objects)
+    maxx = max(o["x"] + o["w"] for o in objects)
+    miny = min(o["y"] for o in objects)
+    maxy = max(o["y"] + o["h"] for o in objects)
+    cur_w = maxx - minx
+    cur_h = maxy - miny
+    if cur_w <= 0 or cur_h <= 0:
+        return
+
+    content_w = _CONTENT_RIGHT - _CONTENT_LEFT
+    avail_w = content_w            # fill the full left column (two-column split)
+    avail_h = (_CONTENT_BOTTOM - _CONTENT_TOP)
+    # Two-column layout: the diagram cluster should FILL the left ~75% band, not
+    # shrink into a small centred block. Scale uniformly to the binding
+    # dimension (allowing modest scale-UP to fill), capped so neither dimension
+    # overflows its band and icons don't blow up absurdly.
+    fit_w = avail_w / cur_w
+    fit_h = avail_h / cur_h
+    scale = min(fit_w, fit_h, 1.35)
+
+    # LEFT-aligned origin (hug the far-left margin), vertically centred in band.
+    new_w = cur_w * scale
+    new_h = cur_h * scale
+    off_x = _CONTENT_LEFT
+    off_y = _CONTENT_TOP + ((_CONTENT_BOTTOM - _CONTENT_TOP) - new_h) / 2
+    # Guard: never let the top-left origin drift above the content band.
+    off_y = max(off_y, _CONTENT_TOP)
+    off_x = max(off_x, _CONTENT_LEFT)
+
+    for o in objects:
+        o["x"] = round(off_x + (o["x"] - minx) * scale, 3)
+        o["y"] = round(off_y + (o["y"] - miny) * scale, 3)
+        o["w"] = round(o["w"] * scale, 3)
+        o["h"] = round(o["h"] * scale, 3)
+
+    # Hard safety clamp: if rounding/geometry still pushes the cluster past the
+    # validator safe area (bottom 7.2 / right content edge), apply ONE more
+    # corrective shrink about the content top-left so everything lands inside.
+    _HARD_BOTTOM = 7.15
+    _HARD_RIGHT = _CONTENT_RIGHT + 0.1
+    bx = max(o["x"] + o["w"] for o in objects)
+    by = max(o["y"] + o["h"] for o in objects)
+    ox = min(o["x"] for o in objects)
+    oy = min(o["y"] for o in objects)
+    corr = min(
+        (_HARD_BOTTOM - oy) / (by - oy) if by > _HARD_BOTTOM and by > oy else 1.0,
+        (_HARD_RIGHT - ox) / (bx - ox) if bx > _HARD_RIGHT and bx > ox else 1.0,
+        1.0,
+    )
+    if corr < 1.0:
+        for o in objects:
+            o["x"] = round(ox + (o["x"] - ox) * corr, 3)
+            o["y"] = round(oy + (o["y"] - oy) * corr, 3)
+            o["w"] = round(o["w"] * corr, 3)
+            o["h"] = round(o["h"] * corr, 3)
+
+    _fill_horizontal(objects)
+
+
+def _fill_horizontal(objects: list[dict]) -> None:
+    """Consume leftover horizontal slack so the AWS Account/VPC box stretches to
+    the right edge of the content band instead of leaving dead space next to it.
+
+    Uniform scaling fits the (tall, narrow) cluster to the band HEIGHT, which
+    leaves horizontal slack because the band is wide. We close that slack with a
+    horizontal-only stretch about the left origin:
+      * CONTAINERS (account/region/vpc/az/subnet/groups) have their x AND width
+        scaled -> the boxes get wider (flex fill).
+      * LEAF icons keep their square w/h; only their CENTRE x is scaled so they
+        stay centred in their now-wider parent without distorting the glyph.
+    This preserves containment and aspect ratios while filling the width.
+    """
+    if not objects:
+        return
+    ox = min(o["x"] for o in objects)
+    bx = max(o["x"] + o["w"] for o in objects)
+    cur_w = bx - ox
+    if cur_w <= 0:
+        return
+    target_w = _CONTENT_RIGHT - ox
+    hs = target_w / cur_w
+    # Only ever stretch (fill), never squeeze; cap so we don't over-stretch.
+    if hs <= 1.01:
+        return
+    hs = min(hs, 1.6)
+    for o in objects:
+        if o.get("kind") == "ICON_LABEL":
+            # Keep the icon square; move its centre to follow the stretch.
+            cx = o["x"] + o["w"] / 2
+            new_cx = ox + (cx - ox) * hs
+            o["x"] = round(new_cx - o["w"] / 2, 3)
+        else:
+            o["x"] = round(ox + (o["x"] - ox) * hs, 3)
+            o["w"] = round(o["w"] * hs, 3)
 
 
 def build_layout_stack(
@@ -734,6 +1127,11 @@ def build_layout_stack(
             "label": b.label,
             "nodeType": b.node_type,
         }
+        # Carry presentation metadata through for the compiler to render.
+        if b.cidr:
+            obj["cidr"] = b.cidr
+        if b.spec:
+            obj["spec"] = b.spec
         objects.append(obj)
         obj_by_id[b.node_id] = obj
 
@@ -753,4 +1151,10 @@ def build_layout_stack(
         "slide": slide,
         "objects": objects,
         "connectors": connectors,
+        # Carry the model's assumptions through for the compiler to render the
+        # 'Key Assumptions' box (Stage E).
+        "assumptions": [
+            a.get("text", "") for a in (model.get("assumptions") or [])
+            if a.get("text")
+        ][:5],
     }

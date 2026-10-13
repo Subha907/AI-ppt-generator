@@ -34,11 +34,11 @@ def validate_pptx(pptx_bytes: bytes, layout: dict) -> dict:
 
     names = [sh.name for sh in slide.shapes]
 
-    # Gate 2: title + legend present.
+    # Gate 2: title present. (The legend + key-assumptions panels were removed
+    # from the deployment layout in favour of a full-height Request Flow rail,
+    # so a legend is no longer mandatory.)
     if not any(n == "slide-title" for n in names):
         errors.append("mandatory slide title is missing")
-    if not any(n == "legend-title" for n in names):
-        errors.append("mandatory legend is missing")
 
     # Gate 3: shape counts match the layout.
     n_objects = len(layout.get("objects", []))

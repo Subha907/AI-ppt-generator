@@ -1,0 +1,55 @@
+rule_pack:
+  id: application.layered
+  version: 1.0.0
+  owner: agent_1
+  status: approved
+  extends:
+  - semantic/common.yaml
+classification:
+  trigger_terms:
+  - logical application
+  - layered architecture
+required_concerns:
+- channels
+- edge_or_entry
+- api_or_integration
+- business_services
+- data_services
+conditional_concerns:
+  eventing:
+    include_when:
+      evidence_contains_any:
+      - event
+      - Kafka
+      - queue
+      - pub/sub
+prohibited_behavior:
+- include_network_routing_details
+- assign_database_without_design_decision
+- use_aws_service_names_for_logical_components
+- include_vpc_subnet_or_az
+completeness_checks: []
+node_vocabulary:
+  channels: [COMPONENT, SERVICE]
+  application_services: [SERVICE, COMPONENT]
+  integration: [INTEGRATION]
+  data: [DATASTORE, DATABASE]
+  external: [EXTERNAL, ACTOR]
+authoring_rules:
+  intent: "Model the LOGICAL application, NOT AWS infrastructure. No VPC/AZ/Subnet/Account/Region. properties.awsService is generally null - these are logical components."
+  root: "Create a single root CONTAINER (e.g. '<Product> Application'); each layer below is a CONTAINER child of the root."
+  layer_groups:
+  - "'Presentation / Channels' -> web app, mobile app, admin portal, public API clients (COMPONENT/SERVICE)."
+  - "'Application Services' -> core service modules (e.g. Grading Service, Order Service, Notification Service, Auth Service)."
+  - "'Integration' -> API gateway, message bus, event stream (INTEGRATION) connecting services."
+  - "'Data' -> logical stores (DATASTORE/DATABASE), e.g. Order DB, Media Store, Search Index."
+  - "'External Systems' -> EXTERNAL systems (payment gateway, partner APIs, shipping)."
+  edges: "Presentation -> Application Services ('calls'); Services -> Integration -> Services ('publishes'/'consumes'); Services -> Data ('reads/writes'); Services -> External ('integrates with'). Short labels; aim for a well-connected diagram."
+renderer_hints:
+  preferred_layout: layered_architecture
+  layer_order:
+  - channels
+  - edge
+  - integration
+  - application_services
+  - data

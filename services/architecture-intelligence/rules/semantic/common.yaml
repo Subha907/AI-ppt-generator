@@ -1,0 +1,45 @@
+rule_pack:
+  id: common.semantic
+  version: 1.0.0
+  owner: agent_1
+  status: approved
+grounding:
+  source_basis:
+    explicit_rfp:
+      evidence_refs_required: true
+    user_requested:
+      prompt_ref_required: true
+    derived_design:
+      rationale_required: true
+    recommended_option:
+      rationale_required: true
+      badge_required: true
+    assumption:
+      assumption_entry_required: true
+    unknown:
+      open_question_required: true
+prohibited_behavior:
+- invent_customer_requirements
+- represent_recommendation_as_explicit_rfp
+- output_pptx_coordinates
+- output_font_or_color_values
+required_concerns:
+- traceable_components
+- valid_relationships
+completeness_checks:
+- id: unique_component_ids
+  severity: error
+  condition:
+    every: components.id
+    rule: unique
+- id: valid_relationship_endpoints
+  severity: error
+  condition:
+    references_valid:
+      collection: relationships
+      references:
+      - from
+      - to
+      target: components.id
+renderer_hints:
+  preferred_layout: from_subtype_rule

@@ -60,6 +60,11 @@ CONTAINER_STYLES: dict[str, ContainerStyle] = {
     "CONTAINER": ContainerStyle(border="79879C", title_fill="79879C",
                                 title_text="FFFFFF", fill="F7F8FA",
                                 dashed=False, border_width=1.0),
+    # External Actors box (outside AWS): dashed blue-grey, white interior,
+    # title tab in muted blue - matches the AWS reference "External Actors" box.
+    "EXTERNAL_GROUP": ContainerStyle(border="5A6B7B", title_fill="E8EDF2",
+                                     title_text="2E3B49", fill="FFFFFF",
+                                     dashed=True, border_width=1.0),
 }
 
 # Subnet tiers (Ruleset section 4) - chosen by label keyword in container_style.
@@ -74,6 +79,16 @@ SUBNET_PRIVATE = ContainerStyle(border="0073BB", title_fill="0073BB",
 SUBNET_DATA = ContainerStyle(border="D13212", title_fill="D13212",
                              title_text="FFFFFF", fill="FDF3F0",
                              dashed=True, border_width=1.0)
+
+# Cross-cutting bottom-row groups: Security = pink/red boundary, Observability
+# = purple boundary (per spec), both with a light tinted interior and a dashed
+# boundary so they read as cross-cutting zones below the VPC.
+GROUP_SECURITY = ContainerStyle(border="DD344C", title_fill="DD344C",
+                                title_text="FFFFFF", fill="FDF2F4",
+                                dashed=True, border_width=1.25)
+GROUP_OBSERVABILITY = ContainerStyle(border="8C4FFF", title_fill="8C4FFF",
+                                     title_text="FFFFFF", fill="F6F2FF",
+                                     dashed=True, border_width=1.25)
 
 # --- Service icon (leaf) styles by category --------------------------------
 # Fills use AWS category colors; text is white for contrast (>= 4.5:1).
@@ -105,6 +120,11 @@ DEFAULT_CONTAINER = CONTAINER_STYLES["CONTAINER"]
 
 # AWS convention: labels on the background use #16191F; lines use a neutral gray.
 TITLE_COLOR = "16191F"
+# Centered slide-title accent (deep AWS navy-blue), matching the reference.
+TITLE_ACCENT = "1A3A6B"
+# Panel header bar fill (right-column description panels) + its text color.
+PANEL_HEADER_FILL = "1A3A6B"
+PANEL_HEADER_TEXT = "FFFFFF"
 CONNECTOR_COLOR = "7D8998"
 BACKGROUND = "FFFFFF"
 
@@ -143,6 +163,12 @@ def container_style(node_type: str, label: str = "") -> ContainerStyle:
         if "private" in low:
             return SUBNET_PRIVATE
         return SUBNET_PRIVATE  # default subnet styling
+    if node_type == "CONTAINER":
+        low = label.lower()
+        if "security" in low:
+            return GROUP_SECURITY
+        if any(k in low for k in ("observ", "monitor", "management", "logging")):
+            return GROUP_OBSERVABILITY
     return CONTAINER_STYLES.get(node_type, DEFAULT_CONTAINER)
 
 
