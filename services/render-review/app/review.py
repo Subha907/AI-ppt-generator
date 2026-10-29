@@ -117,6 +117,10 @@ def _review_stub(layout: dict, project_id: str, job_id: str, attempt: int) -> di
         "decision": decision,
         "score": score,
         "issues": issues,
+        # Honest marker: a stub PASS must never be presented as a real visual
+        # approval (the correction loop keys off this).
+        "provider": "stub",
+        "isStub": True,
         "summary": f"Stub review: {len(issues)} empty-group issue(s).",
     }
 
@@ -143,6 +147,8 @@ def _review_nova(
     report["attempt"] = attempt
     report.setdefault("schemaVersion", "1.0")
     report.setdefault("issues", [])
+    report["provider"] = "nova"
+    report["isStub"] = False
     # Coerce score to int if the model returned a float/string.
     if "score" in report:
         try:

@@ -1,0 +1,88 @@
+{
+  "$id": "https://slidegen/contracts/layout-plan",
+  "title": "LayoutPlan",
+  "description": "Agent 2 intermediate artifact. A STRUCTURAL, non-geometric layout plan that sits between the architecture model and the geometry engines. It interprets the semantic policy intent (strategy + lane/layer/column ordering + emphasis) and the architecture topology into ordered bands and a node->band assignment. It contains NO coordinates, sizes, or routes - geometry remains the sole responsibility of the layout engines. Produced deterministically today; an optional LLM planner may emit the same shape later. Shared abstraction consumed by the geometry patterns.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "projectId", "jobId", "strategy", "bandKind", "bands", "assignments"],
+  "properties": {
+    "schemaVersion": { "type": "string", "const": "1.0" },
+    "projectId": { "type": "string", "minLength": 1 },
+    "jobId": { "type": "string", "minLength": 1 },
+    "strategy": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The resolved layout strategy id, e.g. 'multi_az_columns', 'ordered_lanes', 'banded_tiers', 'column_compare', 'grouped_grid', 'central_hub', 'generic_stack'."
+    },
+    "bandKind": {
+      "type": "string",
+      "enum": ["lane", "layer", "column", "group", "hub", "containment", "none"],
+      "description": "The organizing primitive the strategy uses. 'lane'/'layer'/'column' = ordered 1-D bands (horizontal flow, vertical tiers, side-by-side columns). 'group' = labeled, unordered grouping boxes. 'hub' = a central element with peripheral members. 'containment' = nested containers come straight from the topology (e.g. multi-AZ VPC/AZ/subnet). 'none' = generic fall-through, bands are advisory only."
+    },
+    "bands": {
+      "type": "array",
+      "default": [],
+      "description": "Ordered bands. Index order IS the visual order (left-to-right for lane/column, top-to-bottom for layer). For 'group'/'hub'/'containment' order is non-binding.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["bandId", "order"],
+        "properties": {
+          "bandId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Stable band id, typically the hint token (e.g. 'sources', 'application_services', 'current') or a derived container id."
+          },
+          "label": { "type": ["string", "null"], "default": null, "description": "Human-readable band title for rendering." },
+          "order": { "type": "integer", "minimum": 0, "description": "0-based visual order within the band set." },
+          "role": {
+            "type": ["string", "null"],
+            "default": null,
+            "description": "Optional semantic role, e.g. subnet tier 'public'|'compute'|'data', or 'hub'|'spoke'."
+          }
+        }
+      }
+    },
+    "assignments": {
+      "type": "array",
+      "default": [],
+      "description": "One entry per assigned architecture node, mapping it to a band. A node assigned to no band is reported in diagnostics (unassigned), not silently dropped.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["nodeId", "bandId"],
+        "properties": {
+          "nodeId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Architecture node id (identical to the id the engine/compiler uses)."
+          },
+          "bandId": { "type": "string", "minLength": 1, "description": "The band this node belongs to (must match a bands[].bandId)." },
+          "rank": {
+            "type": ["integer", "null"],
+            "default": null,
+            "description": "Optional intra-band ordering hint (lower first). Advisory; the engine may refine."
+          }
+        }
+      }
+    },
+    "emphasis": {
+      "type": "array",
+      "default": [],
+      "items": { "type": "string" },
+      "description": "Carried-through emphasis aspects from the policy (e.g. 'ingress','trust_boundaries'). Advisory styling/grouping intent for the engine."
+    },
+    "orderingSource": {
+      "type": "string",
+      "enum": ["hint", "topology", "default"],
+      "default": "default",
+      "description": "Where the band ordering came from: an explicit policy hint (laneOrder/layerOrder/columns), the architecture topology (containment), or a documented default."
+    },
+    "diagnostics": {
+      "type": "array",
+      "default": [],
+      "items": { "type": "string" },
+      "description": "Human-readable notes: how bands/ordering were derived, unassigned nodes, unknown hint tokens, fallbacks. Never silent."
+    }
+  }
+}

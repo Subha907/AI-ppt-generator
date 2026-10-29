@@ -21,9 +21,12 @@ def main() -> int:
     parser.add_argument("--job", required=True, help="jobId (job_...)")
     parser.add_argument("--tenant", default=None)
     parser.add_argument(
-        "--engine", default="stack", choices=["stack", "graphviz", "grid"],
-        help="layout engine (stack = AWS-style recursive grids [default]; "
-             "graphviz = auto-routing; grid = original fallback)",
+        "--engine", default=None,
+        choices=["stack", "stack-abs", "graphviz", "grid"],
+        help="explicit layout engine override. Omit to let the policy resolver "
+             "choose from the model's rendererHints.preferredLayout. "
+             "stack = AWS-style recursive grids; stack-abs = absolute swimlanes "
+             "(multi-AZ); graphviz = auto-routing; grid = original fallback",
     )
     args = parser.parse_args()
 

@@ -62,6 +62,15 @@
         }
       }
     },
-    "summary": { "type": "string" }
+    "summary": { "type": "string" },
+    "provider": {
+      "type": "string",
+      "description": "Which reviewer produced this report, e.g. 'nova' or 'stub'. Advisory/diagnostic; lets downstream consumers (and the correction loop) distinguish a real visual review from a stub."
+    },
+    "isStub": {
+      "type": "boolean",
+      "default": false,
+      "description": "True when produced by the stub reviewer. A stub PASS MUST NOT be presented as a real visual approval."
+    }
   }
 }

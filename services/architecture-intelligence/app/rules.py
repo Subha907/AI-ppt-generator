@@ -187,3 +187,14 @@ def resolve_type(name: str) -> str:
 def preferred_layout(pack_id: str) -> str | None:
     """The layout strategy Agent 2 should use for this pack, if declared."""
     return get_rule_pack(pack_id).get("renderer_hints", {}).get("preferred_layout")
+
+
+def renderer_hints(pack_id: str) -> dict:
+    """The full resolved renderer_hints block for a pack (may be empty).
+
+    Returned as-is (snake_case keys from YAML). The caller is responsible for
+    selecting/normalizing the keys it carries downstream; this keeps the rule
+    packs as the single source of truth for layout INTENT.
+    """
+    hints = get_rule_pack(pack_id).get("renderer_hints", {})
+    return dict(hints) if isinstance(hints, dict) else {}

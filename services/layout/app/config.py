@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     slide_height_in: float = 7.5
     safe_margin_in: float = 0.3
 
+    # Layout planner (Phase E). 'deterministic' (default) uses the rule-based
+    # planner. 'nova' uses the optional LLM planner for band assignment/ordering
+    # ONLY, with a deterministic fallback on any failure.
+    plan_provider: str = "nova"  # deterministic | nova
+    plan_model_id: str = "us.amazon.nova-pro-v1:0"
+
     # Local dev identity
     local_tenant_id: str = "tenant-local-dev"
 

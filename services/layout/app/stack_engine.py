@@ -1072,14 +1072,121 @@ def _fill_horizontal(objects: list[dict]) -> None:
             o["w"] = round(o["w"] * hs, 3)
 
 
+# --- Region-mirror pass (multi-region) -------------------------------------
+# Explicit side-by-side placement of N REGION subtrees so sibling regions never
+# collide. Runs AFTER the recursive placement + scale-fit: each region subtree
+# is already internally correct and self-contained, so we only TRANSLATE whole
+# subtrees into non-overlapping columns and grow the ACCOUNT wrapper to enclose
+# them with padding >= the validator's MIN_PADDING. Because the result has no
+# containment breaches, validate()'s auto_correct is a no-op and cannot grow one
+# region into its neighbour (the defect that broke the naive multi-region path).
+_REGION_GAP = 0.35          # horizontal gap between region columns
+_ACCOUNT_PAD = 0.22         # inset of regions inside the account wrapper
+_ACCOUNT_TITLE = 0.34       # account title strip
+
+
+def _descendants(oid: str, children_of: dict[str, list[dict]]) -> list[dict]:
+    out: list[dict] = []
+    for c in children_of.get(oid, []):
+        out.append(c)
+        out.extend(_descendants(c["objectId"], children_of))
+    return out
+
+
+def _translate(objs: list[dict], dx: float, dy: float) -> None:
+    for o in objs:
+        o["x"] = round(o["x"] + dx, 3)
+        o["y"] = round(o["y"] + dy, 3)
+
+
+def _apply_region_mirror(objects: list[dict], slide: dict) -> None:
+    """Lay the REGION subtrees as side-by-side, non-overlapping columns.
+
+    No-op unless there are 2+ REGION objects (single-region deployments are the
+    multi-AZ case, handled by _apply_absolute_swimlanes).
+    """
+    regions = [o for o in objects if o.get("nodeType") == "REGION"]
+    if len(regions) < 2:
+        return
+
+    children_of: dict[str, list[dict]] = {}
+    for o in objects:
+        children_of.setdefault(o.get("parentObjectId"), []).append(o)
+
+    account = next((o for o in objects if o.get("nodeType") == "ACCOUNT"), None)
+
+    # Account-level loose leaves (e.g. a global Route 53) that are NOT inside a
+    # region: collect them to stack in a slim band ABOVE the region columns so
+    # they never overlap a region or force the account to grow sideways.
+    acct_id = account["objectId"] if account else None
+    region_ids = {r["objectId"] for r in regions}
+    loose_global = [
+        o for o in objects
+        if o.get("kind") == "ICON_LABEL"
+        and o.get("parentObjectId") == acct_id
+    ]
+
+    margin = slide["safeMarginIn"]
+    top = margin + 0.6  # below slide title
+    content_left = margin + (_ACCOUNT_PAD if account else 0.0)
+    global_band_h = 0.9 if loose_global else 0.0
+    region_top = top + _ACCOUNT_TITLE + global_band_h
+
+    # Sort regions by current x so a stable left-to-right order is preserved.
+    regions_sorted = sorted(regions, key=lambda r: r.get("x", 0.0))
+
+    # Place each region column left-to-right at region_top, translating the
+    # whole subtree so internal geometry is preserved exactly.
+    cursor_x = content_left
+    max_bottom = region_top
+    for region in regions_sorted:
+        subtree = [region] + _descendants(region["objectId"], children_of)
+        dx = cursor_x - region["x"]
+        dy = region_top - region["y"]
+        _translate(subtree, dx, dy)
+        cursor_x = region["x"] + region["w"] + _REGION_GAP
+        max_bottom = max(max_bottom, region["y"] + region["h"])
+
+    regions_right = cursor_x - _REGION_GAP  # right edge of the last region
+
+    # Place loose global leaves in the top band, centred across the region span.
+    if loose_global:
+        n = len(loose_global)
+        span = regions_right - content_left
+        slot = span / n
+        gy = top + _ACCOUNT_TITLE + 0.1
+        for i, g in enumerate(loose_global):
+            gw = min(g["w"], slot - 0.2)
+            g["w"] = round(gw, 3)
+            g["x"] = round(content_left + i * slot + (slot - gw) / 2, 3)
+            g["y"] = round(gy, 3)
+
+    # Grow the ACCOUNT wrapper to enclose regions + global band with padding, so
+    # auto_correct has nothing to grow.
+    if account:
+        account["x"] = round(margin, 3)
+        account["y"] = round(top, 3)
+        account["w"] = round((regions_right + _ACCOUNT_PAD) - margin, 3)
+        account["h"] = round((max_bottom + _ACCOUNT_PAD) - top, 3)
+
+    # Final safety: shrink the whole cluster to fit the slide safe area if the
+    # two columns exceed the usable width/height (reuses the white-space pass).
+    _apply_white_space_margin(objects)
+
+
 def build_layout_stack(
-    model: dict, slide: dict, absolute_swimlanes: bool = False
+    model: dict, slide: dict, absolute_swimlanes: bool = False,
+    region_mirror: bool = False,
 ) -> dict:
     """Produce a layout-model dict using the recursive stack engine.
 
     absolute_swimlanes=True applies the Rule 2.2/2.3 post-pass: subnet tiers are
     snapped to locked absolute Y lanes (aligned across AZs) and icons are spaced
     by the dynamic formula. Default False keeps the fractional/scale-fit layout.
+
+    region_mirror=True applies the multi-region post-pass: N REGION subtrees are
+    placed as side-by-side non-overlapping columns (each keeping its internal
+    containment), and the ACCOUNT wrapper is sized to enclose them.
     """
     from .routing import route_edges  # local import to avoid cycles
 
@@ -1139,6 +1246,10 @@ def build_layout_stack(
     # connectors anchor to the final locked positions.
     if absolute_swimlanes:
         _apply_absolute_swimlanes(objects)
+    # Multi-region: optional side-by-side region-column post-pass (also before
+    # routing). Mutually exclusive with absolute_swimlanes in practice.
+    if region_mirror:
+        _apply_region_mirror(objects, slide)
 
     max_depth = max((b.depth for b in boxes), default=0)
     connectors = route_edges(edges, obj_by_id, z=max_depth + 1)

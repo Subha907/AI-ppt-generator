@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "1.0",
+  "projectId": "prj_mr",
+  "jobId": "job_mr",
+  "architectureType": "deployment.multi_region",
+  "title": "Multi-Region Active/Passive",
+  "rendererHints": { "preferredLayout": "multi_region_mirror" },
+  "assumptions": [
+    { "id": "asm-1", "text": "Active/passive with async replication to the recovery region.", "approved": false }
+  ],
+  "nodes": [
+    { "id": "acct", "type": "ACCOUNT", "label": "AWS Account", "parentId": null, "properties": {}, "evidenceIds": ["ev-1"] },
+
+    { "id": "reg-primary", "type": "REGION", "label": "us-west-2 (Primary)", "parentId": "acct", "properties": {}, "evidenceIds": ["ev-1"] },
+    { "id": "vpc-p", "type": "VPC", "label": "Primary VPC", "parentId": "reg-primary", "properties": { "cidr": "10.0.0.0/16" }, "evidenceIds": ["ev-1"] },
+    { "id": "p-az1", "type": "AVAILABILITYZONE", "label": "AZ 1", "parentId": "vpc-p", "properties": {}, "evidenceIds": ["ev-1"] },
+    { "id": "p-app", "type": "SUBNET", "label": "Private App", "parentId": "p-az1", "properties": {}, "evidenceIds": ["ev-1"] },
+    { "id": "p-ecs", "type": "COMPUTE", "label": "ECS Primary", "parentId": "p-app", "properties": { "awsService": "Amazon ECS" }, "evidenceIds": ["ev-1"] },
+    { "id": "p-data", "type": "SUBNET", "label": "Isolated Data", "parentId": "p-az1", "properties": {}, "evidenceIds": ["ev-1"] },
+    { "id": "p-rds", "type": "DATABASE", "label": "RDS Primary", "parentId": "p-data", "properties": { "awsService": "Amazon RDS" }, "evidenceIds": ["ev-1"] },
+
+    { "id": "reg-recovery", "type": "REGION", "label": "us-east-1 (Recovery)", "parentId": "acct", "properties": {}, "evidenceIds": ["ev-1"] },
+    { "id": "vpc-s", "type": "VPC", "label": "Recovery VPC", "parentId": "reg-recovery", "properties": { "cidr": "10.1.0.0/16" }, "evidenceIds": ["ev-1"] },
+    { "id": "s-az1", "type": "AVAILABILITYZONE", "label": "AZ 1", "parentId": "vpc-s", "properties": {}, "evidenceIds": ["ev-1"] },
+    { "id": "s-app", "type": "SUBNET", "label": "Private App", "parentId": "s-az1", "properties": {}, "evidenceIds": ["ev-1"] },
+    { "id": "s-ecs", "type": "COMPUTE", "label": "ECS Standby", "parentId": "s-app", "properties": { "awsService": "Amazon ECS" }, "evidenceIds": ["ev-1"] },
+    { "id": "s-data", "type": "SUBNET", "label": "Isolated Data", "parentId": "s-az1", "properties": {}, "evidenceIds": ["ev-1"] },
+    { "id": "s-rds", "type": "DATABASE", "label": "RDS Standby", "parentId": "s-data", "properties": { "awsService": "Amazon RDS" }, "evidenceIds": ["ev-1"] },
+
+    { "id": "r53", "type": "NETWORK", "label": "Route 53 Failover", "parentId": "acct", "properties": { "awsService": "Amazon Route 53" }, "evidenceIds": ["ev-1"] }
+  ],
+  "edges": [
+    { "id": "e1", "source": "r53", "target": "vpc-p", "protocol": "HTTPS", "label": "primary" },
+    { "id": "e2", "source": "r53", "target": "vpc-s", "protocol": "HTTPS", "label": "failover" },
+    { "id": "e3", "source": "p-rds", "target": "s-rds", "protocol": null, "label": "Async Replication" }
+  ],
+  "qualityAttributes": ["availability", "disaster-recovery"]
+}

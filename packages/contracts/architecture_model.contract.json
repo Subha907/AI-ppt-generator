@@ -46,6 +46,48 @@
       ]
     },
     "title": { "type": "string", "minLength": 1 },
+    "rendererHints": {
+      "type": "object",
+      "default": {},
+      "additionalProperties": true,
+      "description": "Optional, non-geometric layout INTENT carried from Agent 1's semantic rule pack to Agent 2 (renderer_hints). Agent 1 MUST NOT place coordinates/sizes here - only strategy intent. Added additively in schemaVersion 1.0; absence is valid for backward compatibility. All fields are advisory; Agent 2's policy resolver/planner interprets them and reports unsupported values in diagnostics (never silently).",
+      "properties": {
+        "preferredLayout": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Preferred layout strategy id from the rule pack's renderer_hints.preferred_layout, e.g. 'multi_az_columns', 'layered_architecture'. Agent 2's policy resolver maps this to an engine; an unsupported value is reported in diagnostics and falls back to a documented default (never silently)."
+        },
+        "alternateLayout": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Optional secondary strategy id from renderer_hints.alternate_layout; used by Agent 2 as a preferred fallback before the generic default."
+        },
+        "laneOrder": {
+          "type": "array",
+          "default": [],
+          "items": { "type": "string" },
+          "description": "Ordered lane/stage ids for flow/swimlane strategies (renderer_hints.lane_order), e.g. ['sources','ingestion','processing','storage','consumption']. Advisory ordering only - no coordinates."
+        },
+        "layerOrder": {
+          "type": "array",
+          "default": [],
+          "items": { "type": "string" },
+          "description": "Ordered tier ids for layered strategies (renderer_hints.layer_order), e.g. ['channels','edge','integration','application_services','data']."
+        },
+        "columns": {
+          "type": "array",
+          "default": [],
+          "items": { "type": "string" },
+          "description": "Ordered column ids for comparison strategies (renderer_hints.columns), e.g. ['current','transition','target']."
+        },
+        "emphasis": {
+          "type": "array",
+          "default": [],
+          "items": { "type": "string" },
+          "description": "Aspects the layout should emphasize (renderer_hints.emphasize), e.g. ['network_boundaries','trust_boundaries','ingress','egress']. Advisory styling/grouping intent."
+        }
+      }
+    },
     "assumptions": {
       "type": "array",
       "default": [],

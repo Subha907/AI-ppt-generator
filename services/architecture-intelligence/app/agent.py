@@ -27,6 +27,68 @@ class RunResult:
     warnings: list[str] = field(default_factory=list)
 
 
+# Whitelist of NON-GEOMETRIC renderer_hints keys carried from the rule pack to
+# the architecture model, mapped from YAML snake_case -> contract camelCase.
+# Only layout INTENT (strategy ids, ordering, emphasis) is carried; anything
+# resembling coordinates/sizes is intentionally excluded (Agent 1 is geometry-
+# free; Agent 2 owns all geometry).
+_HINT_KEY_MAP: dict[str, str] = {
+    "preferred_layout": "preferredLayout",
+    "alternate_layout": "alternateLayout",
+    "lane_order": "laneOrder",
+    "layer_order": "layerOrder",
+    "columns": "columns",
+    "emphasize": "emphasis",
+}
+# Keys whose value must be a list of strings to be carried.
+_HINT_LIST_KEYS = {"laneOrder", "layerOrder", "columns", "emphasis"}
+
+
+def _attach_layout_hint(model: dict, architecture_type: str) -> None:
+    """Record the rule pack's layout INTENT on the model (rendererHints).
+
+    Reads the resolved rule pack's renderer_hints (rules.renderer_hints) and
+    carries the whitelisted, non-geometric fields onto
+    model['rendererHints'] using the contract's camelCase keys:
+    preferredLayout, alternateLayout, laneOrder, layerOrder, columns, emphasis.
+
+    Purely advisory: Agent 2's policy resolver/planner interprets these. No
+    coordinates/sizes are ever carried. Defensive by design - any failure is
+    swallowed so hint resolution can never fail model generation, and existing
+    values on the model are never overwritten.
+    """
+    try:
+        from . import rules
+
+        pack_id = rules.resolve_type(architecture_type)
+        raw = rules.renderer_hints(pack_id)
+    except Exception:
+        raw = {}
+    if not isinstance(raw, dict) or not raw:
+        return
+
+    carried: dict = {}
+    for yaml_key, out_key in _HINT_KEY_MAP.items():
+        if yaml_key not in raw:
+            continue
+        value = raw[yaml_key]
+        if out_key in _HINT_LIST_KEYS:
+            if isinstance(value, list) and all(isinstance(v, str) for v in value):
+                carried[out_key] = list(value)
+        elif isinstance(value, str) and value.strip():
+            carried[out_key] = value.strip()
+
+    if not carried:
+        return
+
+    hints = model.get("rendererHints")
+    if not isinstance(hints, dict):
+        hints = {}
+    for key, value in carried.items():
+        hints.setdefault(key, value)  # never overwrite caller-set values
+    model["rendererHints"] = hints
+
+
 def run_from_job(
     project_id: str,
     job_id: str,
@@ -56,6 +118,13 @@ def run_from_job(
     model = generate(
         provider, architecture_type, instruction, project_id, job_id, evidence
     )
+
+    # 2b. Attach the non-geometric layout INTENT from the rule pack so Agent 2
+    # can resolve a layout strategy without re-parsing the semantic YAML. This
+    # carries ONLY the preferred-layout id (no coordinates/sizes) and is
+    # additive: if the pack declares no hint, rendererHints is omitted and the
+    # model stays valid. Never let a hint lookup break generation.
+    _attach_layout_hint(model, architecture_type)
 
     # 3. Validate against the contract + Agent 1 gates.
     try:

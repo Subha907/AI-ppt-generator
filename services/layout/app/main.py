@@ -28,7 +28,10 @@ class GenerateRequest(BaseModel):
     projectId: str
     jobId: str
     tenantId: str | None = None
-    engine: str = "stack"  # stack | stack-abs | graphviz | grid
+    # Optional explicit engine override. When omitted, the layout policy
+    # resolver chooses the engine from the model's rendererHints.preferredLayout
+    # (with a documented default). Supported: stack | stack-abs | graphviz | grid.
+    engine: str | None = None
 
 
 class ValidateRequest(BaseModel):

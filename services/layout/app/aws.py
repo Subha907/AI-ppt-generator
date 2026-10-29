@@ -46,6 +46,16 @@ def s3_client():
     return _client("s3")
 
 
+@lru_cache
+def bedrock_runtime_client():
+    """Bedrock runtime client for the optional LLM layout planner (Phase E).
+
+    Only used when plan_provider != 'deterministic'. Lazily created so the
+    deterministic default path never requires Bedrock access.
+    """
+    return _client("bedrock-runtime")
+
+
 def verify_sso() -> dict:
     settings = get_settings()
     try:

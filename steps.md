@@ -65,11 +65,28 @@ Payload fields:
 `POST http://127.0.0.1:8002/internal/v1/layouts/generate`
 
 ```json
-{ "projectId": "prj_01M3GZ2D2EJ8Y60MXKY6QNV5P0", "jobId": "<jobId>", "engine": "stack-abs" }
+{ "projectId": "prj_01M3GZ2D2EJ8Y60MXKY6QNV5P0", "jobId": "<jobId>" }
 ```
 
-`engine`: use `stack-abs` (absolute-swimlane engine with the deployment fixes).
-The response includes `overlap_count` and `out_of_bounds_count` - both must be `0`.
+`engine` is **optional**. When omitted, Agent 2 derives the layout strategy from
+the architecture model's `rendererHints.preferredLayout` (set by Agent 1 from
+the semantic rule pack) via a typed policy resolver, builds a validated,
+non-geometric *layout plan* (ordered bands + node assignments), and for
+ordered-band strategies (lane/column/layer/group/hub) the plan DRIVES a reusable
+band engine. Deployment multi-AZ resolves to the `stack-abs` absolute-swimlane
+engine. Pass `engine` (`stack` | `stack-abs` | `graphviz` | `grid`) only to
+force a specific engine (override).
+
+Optional `planProvider`: `deterministic` (default) or `nova`. `nova` lets an LLM
+choose band assignment + ordering ONLY (never coordinates); it is validated
+against the plan contract and falls back to the deterministic planner on any
+failure. Final geometry is always deterministic.
+
+The response includes `overlap_count` and `out_of_bounds_count` (both must be
+`0`) plus structured diagnostics: `strategy`, `engine`, `engine_source`
+(`hint` | `alternate` | `override` | `default`), `preferred_layout`,
+`plan_provider`, `band_kind`, `band_count`, `plan_valid`,
+`selection_diagnostics`, and `plan_diagnostics`.
 
 ### Step 4 - Agent 3: compile PPTX + preview (8003)
 

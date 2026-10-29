@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "1.0",
+  "projectId": "prj_fixture",
+  "jobId": "job_fixture",
+  "architectureType": "deployment.multi_az",
+  "title": "Multi-AZ HA AWS Deployment for Fixture",
+  "rendererHints": { "preferredLayout": "multi_az_columns" },
+  "assumptions": [
+    { "id": "asm-1", "text": "Two AZs for HA; cross-region DR not required.", "approved": false }
+  ],
+  "nodes": [
+    { "id": "acct", "type": "ACCOUNT", "label": "AWS Account", "parentId": null, "properties": {}, "evidenceIds": ["ev-1"] },
+    { "id": "region", "type": "REGION", "label": "us-west-2", "parentId": "acct", "properties": {}, "evidenceIds": ["ev-1"] },
+    { "id": "vpc", "type": "VPC", "label": "Application VPC", "parentId": "region", "properties": { "cidr": "10.0.0.0/16" }, "evidenceIds": ["ev-1"] },
+
+    { "id": "az1", "type": "AVAILABILITYZONE", "label": "AZ 1", "parentId": "vpc", "properties": {}, "evidenceIds": ["ev-1"] },
+    { "id": "az1-pub", "type": "SUBNET", "label": "Public Subnet AZ1", "parentId": "az1", "properties": { "cidr": "10.0.1.0/24" }, "evidenceIds": ["ev-1"] },
+    { "id": "az1-app", "type": "SUBNET", "label": "Private App Subnet AZ1", "parentId": "az1", "properties": { "cidr": "10.0.11.0/24" }, "evidenceIds": ["ev-1"] },
+    { "id": "az1-data", "type": "SUBNET", "label": "Isolated Data Subnet AZ1", "parentId": "az1", "properties": { "cidr": "10.0.21.0/24" }, "evidenceIds": ["ev-1"] },
+    { "id": "nat1", "type": "NETWORK", "label": "NAT Gateway AZ1", "parentId": "az1-pub", "properties": { "awsService": "NAT Gateway" }, "evidenceIds": ["ev-1"] },
+    { "id": "ecs1", "type": "COMPUTE", "label": "App Service AZ1", "parentId": "az1-app", "properties": { "awsService": "Amazon ECS" }, "evidenceIds": ["ev-1"] },
+    { "id": "rds1", "type": "DATABASE", "label": "RDS Primary", "parentId": "az1-data", "properties": { "awsService": "Amazon RDS" }, "evidenceIds": ["ev-1"] },
+
+    { "id": "az2", "type": "AVAILABILITYZONE", "label": "AZ 2", "parentId": "vpc", "properties": {}, "evidenceIds": ["ev-1"] },
+    { "id": "az2-pub", "type": "SUBNET", "label": "Public Subnet AZ2", "parentId": "az2", "properties": { "cidr": "10.0.2.0/24" }, "evidenceIds": ["ev-1"] },
+    { "id": "az2-app", "type": "SUBNET", "label": "Private App Subnet AZ2", "parentId": "az2", "properties": { "cidr": "10.0.12.0/24" }, "evidenceIds": ["ev-1"] },
+    { "id": "az2-data", "type": "SUBNET", "label": "Isolated Data Subnet AZ2", "parentId": "az2", "properties": { "cidr": "10.0.22.0/24" }, "evidenceIds": ["ev-1"] },
+    { "id": "nat2", "type": "NETWORK", "label": "NAT Gateway AZ2", "parentId": "az2-pub", "properties": { "awsService": "NAT Gateway" }, "evidenceIds": ["ev-1"] },
+    { "id": "ecs2", "type": "COMPUTE", "label": "App Service AZ2", "parentId": "az2-app", "properties": { "awsService": "Amazon ECS" }, "evidenceIds": ["ev-1"] },
+    { "id": "rds2", "type": "DATABASE", "label": "RDS Standby", "parentId": "az2-data", "properties": { "awsService": "Amazon RDS" }, "evidenceIds": ["ev-1"] },
+
+    { "id": "igw", "type": "NETWORK", "label": "Internet Gateway", "parentId": "vpc", "properties": { "awsService": "Internet Gateway" }, "evidenceIds": ["ev-1"] },
+    { "id": "alb", "type": "NETWORK", "label": "Application Load Balancer", "parentId": "vpc", "properties": { "awsService": "Application Load Balancer" }, "evidenceIds": ["ev-1"] }
+  ],
+  "edges": [
+    { "id": "e1", "source": "alb", "target": "ecs1", "protocol": "HTTPS", "label": "routes" },
+    { "id": "e2", "source": "alb", "target": "ecs2", "protocol": "HTTPS", "label": "routes" },
+    { "id": "e3", "source": "ecs1", "target": "rds1", "protocol": "TCP", "label": "reads/writes" },
+    { "id": "e4", "source": "ecs2", "target": "rds2", "protocol": "TCP", "label": "reads/writes" },
+    { "id": "e5", "source": "rds1", "target": "rds2", "protocol": null, "label": "Synchronous Replication" }
+  ],
+  "qualityAttributes": ["availability", "security"]
+}
